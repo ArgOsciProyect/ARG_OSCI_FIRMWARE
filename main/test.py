@@ -3,16 +3,20 @@ import time
 import select
 import threading
 import matplotlib.pyplot as plt
-from collections import deque
+from queue import Queue
+from scipy.interpolate import interp1d
+import numpy as np
+import struct
+from scipy.signal import find_peaks
 
 # Configuración del servidor
-HOST = '192.168.100.144'  # IP del AP de la ESP32
+HOST = '192.168.4.1'  # IP del AP de la ESP32
 PORT = 8080           # Puerto del servidor
-BUFFER_SIZE = 1440    # Tamaño del buffer para TCP
+BUFFER_SIZE = 4096    # Tamaño del buffer para TCP
 BUFFER_SIZE_UDP = 1024 * 32  # Tamaño del buffer para UDP
 USE_TCP = True        # Cambia a False para usar UDP
 
-data_queue = deque(maxlen=1000)  # Cola para almacenar los datos recibidos
+data_queue = Queue(maxsize=1000)  # Cola para almacenar los datos recibidos
 
 def receive_data():
     if USE_TCP:
@@ -65,7 +69,10 @@ def receive_data():
                         max_packet_interval = packet_interval
 
                     # Añadir datos a la cola
-                    data_queue.extend(data)
+                    for i in range(0, len(data), 2):
+                        if i + 1 < len(data):
+                            value = struct.unpack('H', data[i:i+2])[0]
+                            data_queue.put(value)
 
                     print(f"Tiempo mínimo entre paquetes: {max_packet_interval:.6f} segundos", end='\r')
         except KeyboardInterrupt:
@@ -92,31 +99,50 @@ def receive_data():
 def plot_data():
     plt.ion()
     fig, ax = plt.subplots()
-    x_data = deque(maxlen=1000)
-    y_data = deque(maxlen=1000)
+    x_data = []
+    y_data = []
     line, = ax.plot(x_data, y_data)
-    ax.set_ylim(0, 4095)  # Rango de 12 bits
+    ax.set_ylim(0, 65535)  # Rango de 16 bits
+
+    sample_interval = 0.5e-6  # Intervalo de muestreo en segundos (0.5 microsegundos)
 
     while True:
-        if data_queue:
-            y_data.extend(data_queue)
-            x_data.extend(range(len(y_data)))
-            line.set_xdata(x_data)
-            line.set_ydata(y_data)
+        while not data_queue.empty():
+            y_data.append(data_queue.get())
+            x_data.append(len(x_data))
+
+            # Interpolación
+            if len(x_data) > 1:
+                f = interp1d(x_data, y_data, kind='linear')
+                x_interp = np.linspace(min(x_data), max(x_data), num=len(x_data)*10)
+                y_interp = f(x_interp)
+                line.set_xdata(x_interp)
+                line.set_ydata(y_interp)
+            else:
+                line.set_xdata(x_data)
+                line.set_ydata(y_data)
+
             ax.relim()
             ax.autoscale_view()
             plt.draw()
             plt.pause(0.01)
 
+            # Calcular la frecuencia de la señal
+            if len(y_data) > 1:
+                peaks, _ = find_peaks(y_data)
+                if len(peaks) > 1:
+                    peak_intervals = np.diff(peaks) * sample_interval
+                    avg_peak_interval = np.mean(peak_intervals)
+                    frequency = 1 / avg_peak_interval if avg_peak_interval > 0 else 0
+                    print(f"Frecuencia de la señal: {frequency:.2f} Hz", end='\r')
+
 def main():
     receive_thread = threading.Thread(target=receive_data)
-    plot_thread = threading.Thread(target=plot_data)
-
     receive_thread.start()
-    plot_thread.start()
+
+    plot_data()  # Run plot_data in the main thread
 
     receive_thread.join()
-    plot_thread.join()
 
 if __name__ == "__main__":
     main()
