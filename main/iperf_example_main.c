@@ -3,12 +3,15 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "lwip/sockets.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
+#include "esp_system.h"  // Include the header for esp_cpu_get_cycle_count()
 #include "esp_system.h"
 
 #define WIFI_SSID_STA "IPLAN-1_D"
@@ -17,11 +20,11 @@
 #define WIFI_PASS_AP "12345678"
 #define MAX_STA_CONN 1
 #define PORT 8080
-#define DATA_SIZE 1400
-#define TARGET_SPEED_MBPS 4
-#define DELAY_US (1000 * DATA_SIZE / (TARGET_SPEED_MBPS * 1024))
-#define DATA_SIZE 1024
+#define DATA_SIZE (SAMPLE_RATE / SIGNAL_FREQUENCY)  // Tamaño del array para un período completo
 #define PI 3.14159265358979323846
+#define SAMPLE_RATE 2000000  // Frecuencia de muestreo en Hz (20 kHz)
+#define DELAY_US (1000000 / SAMPLE_RATE)  // Delay in microseconds for 2 MHz rate
+#define SIGNAL_FREQUENCY 500000  // Frecuencia de la señal en Hz (1 kHz)
 
 // Define to select protocol (TCP or UDP)
 #define USE_TCP
@@ -32,6 +35,9 @@
 static const char *TAG = "wifi_example";
 static EventGroupHandle_t s_wifi_event_group;
 const int WIFI_CONNECTED_BIT = BIT0;
+
+QueueHandle_t data_queue;
+volatile bool transmission_active = false;
 
 #ifdef USE_AP
 void wifi_init_softap(void)
@@ -70,7 +76,6 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(19));  // Set max transmit power to 19 dBm
-
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", WIFI_SSID_AP, WIFI_PASS_AP);
 }
@@ -130,6 +135,31 @@ void wifi_init_sta(void)
 }
 #endif
 
+void generate_sine_wave_task(void *pvParameters)
+{
+    uint16_t data[DATA_SIZE];
+    for (int i = 0; i < DATA_SIZE; i++) {
+        data[i] = (uint16_t)((sin(2 * PI * i / DATA_SIZE) + 1) * 2047.5); // Scale to 0-4095
+    }
+
+    int index = 0;
+    while (1) {
+        if (transmission_active) {
+            if (xQueueSend(data_queue, &data[index], portMAX_DELAY) != pdPASS) {
+                ESP_LOGE(TAG, "Failed to send data to queue");
+            }
+            index = (index + 1) % DATA_SIZE;  // Loop through the data array
+
+            // Busy wait for 500 ns (125 cycles at 240 MHz)
+            uint32_t ccount_start = esp_cpu_get_cycle_count();  // Get the CPU cycle count
+            while (esp_cpu_get_cycle_count() - ccount_start < 125) {
+                // Busy-wait until 125 cycles have passed (~500 ns)
+            }
+        }
+    }
+}
+
+
 void server_task(void *pvParameters)
 {
     char addr_str[128];
@@ -173,11 +203,7 @@ void server_task(void *pvParameters)
     }
 #endif
 
-    // Generate sine wave data
-    uint16_t data[DATA_SIZE];
-    for (int i = 0; i < DATA_SIZE; i++) {
-        data[i] = (uint16_t)((sin(2 * PI * i / DATA_SIZE) + 1) * 2047.5); // Scale to 0-4095
-    }
+    uint16_t data;
 
     while (1) {
         ESP_LOGI(TAG, "Socket listening");
@@ -194,14 +220,19 @@ void server_task(void *pvParameters)
         inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr.s_addr, addr_str, sizeof(addr_str) - 1);
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
+        transmission_active = true;
+
         while (1) {
-            int written = send(sock, data, sizeof(data), 0);
-            if (written < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
+            if (xQueueReceive(data_queue, &data, portMAX_DELAY) == pdPASS) {
+                int written = send(sock, &data, sizeof(data), 0);
+                if (written < 0) {
+                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                    break;
+                }
             }
-            //esp_rom_delay_us(DELAY_US);
         }
+
+        transmission_active = false;
 
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
@@ -222,14 +253,20 @@ void server_task(void *pvParameters)
         buffer[len] = '\0'; // Null-terminate the received data
         ESP_LOGI(TAG, "Received message from client: %s", buffer);
 
+        transmission_active = true;
+
         // Continuar enviando datos al cliente
         while (1) {
-            int sent = sendto(listen_sock, data, sizeof(data), 0, (struct sockaddr *)&source_addr, addr_len);
-            if (sent < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
+            if (xQueueReceive(data_queue, &data, portMAX_DELAY) == pdPASS) {
+                int sent = sendto(listen_sock, &data, sizeof(data), 0, (struct sockaddr *)&source_addr, addr_len);
+                if (sent < 0) {
+                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                    break;
+                }
             }
         }
+
+        transmission_active = false;
 #endif
     }
 
@@ -254,5 +291,12 @@ void app_main(void)
     wifi_init_sta();
 #endif
 
-    xTaskCreate(server_task, "server_task", 1440*12 * 2, NULL, 5, NULL);
+    data_queue = xQueueCreate(10, DATA_SIZE * sizeof(uint16_t));
+    if (data_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create queue");
+        return;
+    }
+
+    xTaskCreatePinnedToCore(generate_sine_wave_task, "generate_sine_wave_task", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(server_task, "server_task", 8192, NULL, 5, NULL, 0);
 }
