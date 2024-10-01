@@ -1,4 +1,4 @@
-# Install script for directory: /home/joaquin/Facu/TESIS/iperf/main
+# Install script for directory: /home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/main
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

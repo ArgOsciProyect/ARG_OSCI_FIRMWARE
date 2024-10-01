@@ -39,7 +39,7 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/home/joaquin/Facu/TESIS/iperf/build/bootloader/esp-idf/cmake_install.cmake")
+  include("/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader/esp-idf/cmake_install.cmake")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/joaquin/Facu/TESIS/iperf/build/bootloader/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

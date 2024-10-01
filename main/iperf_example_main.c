@@ -1,4 +1,6 @@
 #include <string.h>
+#include <math.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_wifi.h"
@@ -18,6 +20,8 @@
 #define DATA_SIZE 1400
 #define TARGET_SPEED_MBPS 4
 #define DELAY_US (1000 * DATA_SIZE / (TARGET_SPEED_MBPS * 1024))
+#define DATA_SIZE 1024
+#define PI 3.14159265358979323846
 
 // Define to select protocol (TCP or UDP)
 #define USE_TCP
@@ -126,7 +130,6 @@ void wifi_init_sta(void)
 }
 #endif
 
-
 void server_task(void *pvParameters)
 {
     char addr_str[128];
@@ -170,6 +173,12 @@ void server_task(void *pvParameters)
     }
 #endif
 
+    // Generate sine wave data
+    uint16_t data[DATA_SIZE];
+    for (int i = 0; i < DATA_SIZE; i++) {
+        data[i] = (uint16_t)((sin(2 * PI * i / DATA_SIZE) + 1) * 2047.5); // Scale to 0-4095
+    }
+
     while (1) {
         ESP_LOGI(TAG, "Socket listening");
 
@@ -185,11 +194,8 @@ void server_task(void *pvParameters)
         inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr.s_addr, addr_str, sizeof(addr_str) - 1);
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
-        char data[DATA_SIZE];
-        memset(data, 'A', DATA_SIZE);
-
         while (1) {
-            int written = send(sock, data, DATA_SIZE, 0);
+            int written = send(sock, data, sizeof(data), 0);
             if (written < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
@@ -205,8 +211,6 @@ void server_task(void *pvParameters)
 #else
         struct sockaddr_in source_addr;
         socklen_t addr_len = sizeof(source_addr);
-        char data[DATA_SIZE];
-        memset(data, 'A', DATA_SIZE);
 
         // Esperar el primer mensaje del cliente para obtener su dirección
         char buffer[128];
@@ -220,7 +224,7 @@ void server_task(void *pvParameters)
 
         // Continuar enviando datos al cliente
         while (1) {
-            int sent = sendto(listen_sock, data, DATA_SIZE, 0, (struct sockaddr *)&source_addr, addr_len);
+            int sent = sendto(listen_sock, data, sizeof(data), 0, (struct sockaddr *)&source_addr, addr_len);
             if (sent < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
@@ -231,7 +235,6 @@ void server_task(void *pvParameters)
 
     vTaskDelete(NULL);
 }
-
 
 void app_main(void)
 {

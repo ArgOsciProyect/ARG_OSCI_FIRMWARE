@@ -1,6 +1,9 @@
 import socket
 import time
 import select
+import threading
+import matplotlib.pyplot as plt
+from collections import deque
 
 # Configuración del servidor
 HOST = '192.168.100.144'  # IP del AP de la ESP32
@@ -9,7 +12,9 @@ BUFFER_SIZE = 1440    # Tamaño del buffer para TCP
 BUFFER_SIZE_UDP = 1024 * 32  # Tamaño del buffer para UDP
 USE_TCP = True        # Cambia a False para usar UDP
 
-def main():
+data_queue = deque(maxlen=1000)  # Cola para almacenar los datos recibidos
+
+def receive_data():
     if USE_TCP:
         sock_type = socket.SOCK_STREAM
         protocol = "TCP"
@@ -59,6 +64,9 @@ def main():
                     if packet_interval > max_packet_interval:
                         max_packet_interval = packet_interval
 
+                    # Añadir datos a la cola
+                    data_queue.extend(data)
+
                     print(f"Tiempo mínimo entre paquetes: {max_packet_interval:.6f} segundos", end='\r')
         except KeyboardInterrupt:
             pass
@@ -80,7 +88,35 @@ def main():
         
         if not USE_TCP:
             s.sendto(b"SHUTDOWN", server_address)
-            
+
+def plot_data():
+    plt.ion()
+    fig, ax = plt.subplots()
+    x_data = deque(maxlen=1000)
+    y_data = deque(maxlen=1000)
+    line, = ax.plot(x_data, y_data)
+    ax.set_ylim(0, 4095)  # Rango de 12 bits
+
+    while True:
+        if data_queue:
+            y_data.extend(data_queue)
+            x_data.extend(range(len(y_data)))
+            line.set_xdata(x_data)
+            line.set_ydata(y_data)
+            ax.relim()
+            ax.autoscale_view()
+            plt.draw()
+            plt.pause(0.01)
+
+def main():
+    receive_thread = threading.Thread(target=receive_data)
+    plot_thread = threading.Thread(target=plot_data)
+
+    receive_thread.start()
+    plot_thread.start()
+
+    receive_thread.join()
+    plot_thread.join()
 
 if __name__ == "__main__":
     main()

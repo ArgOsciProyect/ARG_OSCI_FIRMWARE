@@ -1,4 +1,4 @@
-# Install script for directory: /home/joaquin/Facu/TESIS/iperf/managed_components/esp-qa__wifi-cmd
+# Install script for directory: /home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/managed_components/esp-qa__wifi-cmd
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

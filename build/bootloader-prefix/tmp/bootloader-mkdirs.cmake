@@ -5,18 +5,18 @@ cmake_minimum_required(VERSION 3.5)
 
 file(MAKE_DIRECTORY
   "/home/joaquin/esp/v5.3.1/esp-idf/components/bootloader/subproject"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/tmp"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/src/bootloader-stamp"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/src"
-  "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/tmp"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/src/bootloader-stamp"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/src"
+  "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "/home/joaquin/Facu/TESIS/iperf/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()
