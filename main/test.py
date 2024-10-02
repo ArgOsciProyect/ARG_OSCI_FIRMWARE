@@ -3,7 +3,6 @@ import threading
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import struct
 
 # Configuración de conexión
 ESP32_IP = "192.168.4.1"  # Dirección IP de la ESP32 (modo AP)
@@ -17,6 +16,7 @@ data_buffer = np.zeros(SAMPLES, dtype=np.uint16)
 transmission_speed = 0
 is_compressed = False
 transmission_active = True
+buffer_lock = threading.Lock()
 
 # Función para desempaquetar datos comprimidos de 12 bits
 def unpack_12bit_data(input_data):
@@ -42,23 +42,30 @@ def unpack_12bit_data(input_data):
 def receive_data(sock):
     global data_buffer, transmission_speed, transmission_active
 
-    priority_thread = threading.current_thread()
-    priority_thread.name = "receiver_thread"
-    priority_thread.daemon = True
     time_start = time.time()
-
+    total_bytes = 0  # Contador para medir la velocidad
     while transmission_active:
         try:
             # Recepción de datos desde la ESP32
             raw_data = sock.recv(DATA_SIZE * 3 // 2 if is_compressed else DATA_SIZE * 2)
-            if is_compressed:
-                data_buffer = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
-            else:
-                data_buffer = np.frombuffer(raw_data, dtype=np.uint16)
+            if not raw_data:
+                break  # Desconexión o error en la recepción
 
-            # Actualiza el tiempo de inicio para calcular la velocidad
-            transmission_speed = len(raw_data) / (time.time() - time_start)
-            time_start = time.time()
+            # Descomprimir o procesar los datos
+            with buffer_lock:
+                if is_compressed:
+                    data_buffer = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
+                else:
+                    data_buffer = np.frombuffer(raw_data, dtype=np.uint16)
+
+            total_bytes += len(raw_data)
+            # Actualizar la velocidad de transmisión
+            elapsed_time = time.time() - time_start
+            if elapsed_time > 1:  # Actualizar cada segundo
+                transmission_speed = total_bytes / elapsed_time
+                time_start = time.time()
+                total_bytes = 0
+
         except socket.error as e:
             print(f"Error receiving data: {e}")
             transmission_active = False
@@ -74,18 +81,20 @@ def calculate_speed():
 
 # Función para graficar los datos
 def plot_data():
-    global data_buffer
+    global data_buffer, transmission_active
 
     plt.ion()  # Modo interactivo de matplotlib
     fig, ax = plt.subplots()
     line, = ax.plot(data_buffer)
 
     while transmission_active:
-        line.set_ydata(data_buffer)
-        ax.relim()
-        ax.autoscale_view()
+        with buffer_lock:
+            line.set_ydata(data_buffer)
+            ax.relim()
+            ax.autoscale_view()
+
         plt.draw()
-        plt.pause(0.01)
+        plt.pause(0.05)  # Ajustar si es necesario
 
     plt.ioff()
     plt.show()
@@ -104,7 +113,7 @@ def main():
     print(f"Conectado a la ESP32 en {ESP32_IP}:{ESP32_PORT}")
 
     # Crear y comenzar el hilo de recepción con prioridad alta
-    receiver_thread = threading.Thread(target=receive_data, args=(sock,), daemon=True)
+    receiver_thread = threading.Thread(target=receive_data, args=(sock,))
     receiver_thread.start()
 
     # Crear y comenzar el hilo para calcular la velocidad
@@ -118,7 +127,6 @@ def main():
         print("Deteniendo transmisión...")
         transmission_active = False
         receiver_thread.join()
-        speed_thread.join()
         sock.close()
 
 if __name__ == "__main__":
