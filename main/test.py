@@ -3,6 +3,7 @@ import threading
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import struct
 
 # Configuración de conexión
 ESP32_IP = "192.168.4.1"  # Dirección IP de la ESP32 (modo AP)
@@ -11,13 +12,11 @@ ESP32_PORT = 8080  # Puerto de la ESP32
 DATA_SIZE = 1440  # Tamaño de datos esperado
 SAMPLES = DATA_SIZE // 2  # Número de muestras (2 bytes por muestra)
 
-# Variables globales
+# Variables globales para almacenamiento y control
 data_buffer = np.zeros(SAMPLES, dtype=np.uint16)
-raw_data_buffer = None
 transmission_speed = 0
 is_compressed = False
 transmission_active = True
-data_ready_event = threading.Event()  # Evento para sincronizar descompresión
 
 # Función para desempaquetar datos comprimidos de 12 bits
 def unpack_12bit_data(input_data):
@@ -41,37 +40,29 @@ def unpack_12bit_data(input_data):
 
 # Hilo para recibir los datos desde la ESP32
 def receive_data(sock):
-    global raw_data_buffer, transmission_speed, transmission_active
+    global data_buffer, transmission_speed, transmission_active
 
+    priority_thread = threading.current_thread()
+    priority_thread.name = "receiver_thread"
+    priority_thread.daemon = True
     time_start = time.time()
 
     while transmission_active:
         try:
             # Recepción de datos desde la ESP32
-            raw_data_buffer = sock.recv(DATA_SIZE * 3 // 2 if is_compressed else DATA_SIZE * 2)
+            raw_data = sock.recv(DATA_SIZE * 3 // 2 if is_compressed else DATA_SIZE * 2)
+            if is_compressed:
+                data_buffer = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
+            else:
+                data_buffer = np.frombuffer(raw_data, dtype=np.uint16)
 
-            # Calcular la velocidad de transmisión
-            transmission_speed = len(raw_data_buffer) / (time.time() - time_start)
+            # Actualiza el tiempo de inicio para calcular la velocidad
+            transmission_speed = len(raw_data) / (time.time() - time_start)
             time_start = time.time()
-
-            # Notificar que los datos están listos
-            data_ready_event.set()
         except socket.error as e:
             print(f"Error receiving data: {e}")
             transmission_active = False
             break
-
-# Hilo para descomprimir los datos (si es necesario)
-def decompress_data():
-    global data_buffer, raw_data_buffer, transmission_active
-
-    while transmission_active:
-        data_ready_event.wait()  # Espera a que los datos estén listos
-        if is_compressed:
-            data_buffer = unpack_12bit_data(np.frombuffer(raw_data_buffer, dtype=np.uint8))
-        else:
-            data_buffer = np.frombuffer(raw_data_buffer, dtype=np.uint16)
-        data_ready_event.clear()  # Reiniciar el evento
 
 # Hilo para calcular la velocidad de transmisión
 def calculate_speed():
@@ -116,10 +107,6 @@ def main():
     receiver_thread = threading.Thread(target=receive_data, args=(sock,), daemon=True)
     receiver_thread.start()
 
-    # Crear y comenzar el hilo para descomprimir (si es necesario)
-    decompression_thread = threading.Thread(target=decompress_data, daemon=True)
-    decompression_thread.start()
-
     # Crear y comenzar el hilo para calcular la velocidad
     speed_thread = threading.Thread(target=calculate_speed, daemon=True)
     speed_thread.start()
@@ -131,7 +118,6 @@ def main():
         print("Deteniendo transmisión...")
         transmission_active = False
         receiver_thread.join()
-        decompression_thread.join()
         speed_thread.join()
         sock.close()
 
