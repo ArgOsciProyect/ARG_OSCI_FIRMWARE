@@ -1,24 +1,27 @@
 import socket
 import threading
+import queue
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 
 # Configuración de conexión
-ESP32_IP = "192.168.4.1"  # Dirección IP de la ESP32 (modo AP)
-ESP32_PORT = 8080  # Puerto de la ESP32
-
+ESP32_IP = "192.168.4.1"
+ESP32_PORT = 8080
 DATA_SIZE = 1440  # Tamaño de datos esperado
 SAMPLES = DATA_SIZE // 2  # Número de muestras (2 bytes por muestra)
 
-# Variables globales para almacenamiento y control
-data_buffer = np.zeros(SAMPLES, dtype=np.uint16)
-raw_data_buffer = []
-total_bytes_received = 0  # Para el cálculo de velocidad
-transmission_speed = 0
+# Variables globales
 is_compressed = False
 transmission_active = True
-buffer_lock = threading.Lock()
+transmission_speed = 0
+received_bytes = 0
+lock = threading.Lock()
+
+# Definir las colas
+recv_queue = queue.Queue(maxsize=10)  # Cola para la recepción
+comp_queue = queue.Queue(maxsize=10)  # Cola para la compresión (si aplica)
+graph_queue = queue.Queue(maxsize=10)  # Cola para la graficación
 
 # Función para desempaquetar datos comprimidos de 12 bits
 def unpack_12bit_data(input_data):
@@ -40,113 +43,98 @@ def unpack_12bit_data(input_data):
 
     return output_data
 
-# Hilo para recibir los datos desde la ESP32
+# Thread para recibir los datos desde la ESP32 y colocarlos en recv_queue
 def receive_data(sock):
-    global raw_data_buffer, total_bytes_received, transmission_active
+    global transmission_speed, transmission_active, received_bytes
 
+    time_start = time.time()
     while transmission_active:
         try:
-            # Recepción de datos desde la ESP32
             raw_data = sock.recv(DATA_SIZE * 3 // 2 if is_compressed else DATA_SIZE * 2)
             if not raw_data:
                 break  # Desconexión o error en la recepción
 
-            # Almacenar los datos crudos en el buffer
-            with buffer_lock:
-                raw_data_buffer.append(raw_data)
+            recv_queue.put(raw_data)  # Colocar los datos recibidos en la cola
+            received_bytes += len(raw_data)
 
-            total_bytes_received += len(raw_data)
+            # Actualizar la velocidad de transmisión de forma atomica
+            elapsed_time = time.time() - time_start
+            if elapsed_time >= 10:  # Calcular cada 10 segundos
+                with lock:
+                    transmission_speed = received_bytes / elapsed_time
+                received_bytes = 0
+                time_start = time.time()
 
         except socket.error as e:
             print(f"Error receiving data: {e}")
             transmission_active = False
             break
 
-# Hilo para descomprimir los datos
-def decompress_data():
-    global raw_data_buffer, data_buffer, transmission_active
-
+# Thread para descomprimir (si es necesario) y pasar los datos a la graph_queue
+def compression_module():
     while transmission_active:
-        if raw_data_buffer:
-            with buffer_lock:
-                raw_data = raw_data_buffer.pop(0)
+        raw_data = recv_queue.get()  # Obtener datos de la cola de recepción
 
-            if is_compressed:
-                decompressed_data = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
-            else:
-                decompressed_data = np.frombuffer(raw_data, dtype=np.uint16)
+        if is_compressed:
+            decompressed_data = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
+            comp_queue.put(decompressed_data)  # Colocar en la cola de compresión
+        else:
+            comp_queue.put(np.frombuffer(raw_data, dtype=np.uint16))
 
-            with buffer_lock:
-                data_buffer[:] = decompressed_data
-
-        time.sleep(0.01)  # Ajustar según la necesidad de procesamiento
-
-# Hilo para calcular la velocidad de transmisión
-def calculate_speed():
-    global total_bytes_received, transmission_speed, transmission_active
-
-    previous_bytes = 0
-    while transmission_active:
-        time.sleep(1)  # Calcular cada segundo
-        with buffer_lock:
-            transmission_speed = (total_bytes_received - previous_bytes) / 1024  # En KB/s
-            previous_bytes = total_bytes_received
-        print(f"Velocidad de transmisión: {transmission_speed:.2f} KB/s")
-
-# Función para graficar los datos
+# Thread para graficar los datos
 def plot_data():
-    global data_buffer, transmission_active
-
-    plt.ion()  # Modo interactivo de matplotlib
+    plt.ion()
     fig, ax = plt.subplots()
-    line, = ax.plot(data_buffer)
+    line, = ax.plot(np.zeros(SAMPLES))
 
     while transmission_active:
-        with buffer_lock:
-            line.set_ydata(data_buffer)
-            ax.relim()
-            ax.autoscale_view()
-
+        data_to_plot = comp_queue.get()  # Obtener datos de la cola de compresión
+        line.set_ydata(data_to_plot)
+        ax.relim()
+        ax.autoscale_view()
         plt.draw()
-        plt.pause(0.05)  # Ajustar si es necesario
+        plt.pause(0.05)
 
     plt.ioff()
     plt.show()
 
-# Función principal para conectar, recibir y graficar
+# Thread de baja prioridad para imprimir la velocidad de transmisión
+def print_speed():
+    while transmission_active:
+        time.sleep(10)
+        with lock:
+            print(f"Velocidad de transmisión: {transmission_speed / 1024:.2f} KB/s")
+
+# Función principal para conectar, recibir y gestionar threads
 def main():
     global is_compressed, transmission_active
 
-    # Preguntar si los datos están comprimidos
     compress_choice = input("¿Están los datos comprimidos? (s/n): ").lower()
     is_compressed = compress_choice == "s"
 
-    # Crear socket y conectar a ESP32
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((ESP32_IP, ESP32_PORT))
     print(f"Conectado a la ESP32 en {ESP32_IP}:{ESP32_PORT}")
 
-    # Crear y comenzar el hilo de recepción con prioridad alta
+    # Crear y comenzar los threads
     receiver_thread = threading.Thread(target=receive_data, args=(sock,))
+    compression_thread = threading.Thread(target=compression_module)
+    plot_thread = threading.Thread(target=plot_data)
+    speed_thread = threading.Thread(target=print_speed)
+
+    # Priorizar los threads críticos
     receiver_thread.start()
-
-    # Crear y comenzar el hilo para descomprimir los datos
-    decompression_thread = threading.Thread(target=decompress_data, daemon=True)
-    decompression_thread.start()
-
-    # Crear y comenzar el hilo para calcular la velocidad
-    speed_thread = threading.Thread(target=calculate_speed, daemon=True)
+    compression_thread.start()
+    plot_thread.start()
     speed_thread.start()
 
-    # Iniciar el gráfico en el hilo principal
     try:
-        plot_data()
+        receiver_thread.join()
+        compression_thread.join()
+        plot_thread.join()
     except KeyboardInterrupt:
         print("Deteniendo transmisión...")
         transmission_active = False
-        receiver_thread.join()
-        decompression_thread.join()
-        speed_thread.join()
         sock.close()
 
 if __name__ == "__main__":
