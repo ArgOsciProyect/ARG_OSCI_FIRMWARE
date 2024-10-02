@@ -32,8 +32,9 @@
 // Define to select mode (AP or STA)
 #define USE_AP
 
+#define ENABLE_COMPRESSION  // Definir para habilitar compresión
+
 static const char *TAG = "wifi_example";
-static EventGroupHandle_t s_wifi_event_group;
 const int WIFI_CONNECTED_BIT = BIT0;
 
 QueueHandle_t data_queue;
@@ -144,9 +145,8 @@ void generate_sine_wave_task(void *pvParameters)
         return;
     }
 
-    // Generar la onda sinusoidal usando SAMPLE_RATE y SIGNAL_FREQUENCY
     for (int i = 0; i < DATA_SIZE; i++) {
-        data[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQUENCY * i / SAMPLE_RATE) + 1) * 2047.5); // Escalar a 0-4095
+        data[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQUENCY * i / SAMPLE_RATE) + 1) * 2047.5);
     }
 
     while (1) {
@@ -161,20 +161,31 @@ void generate_sine_wave_task(void *pvParameters)
     free(data);
 }
 
-void pack_12bit_data(uint16_t *input, uint8_t *output, size_t num_samples) {
+#ifdef ENABLE_COMPRESSION
+void pack_12bit_data_stream(uint16_t *input, uint8_t *output, size_t num_samples) {
     size_t output_index = 0;
-    for (size_t i = 0; i < num_samples; i += 2) {
-        // Empaquetar dos muestras de 12 bits en 3 bytes
-        uint16_t sample1 = input[i] & 0x0FFF;  // Tomar los 12 bits de la primera muestra
-        uint16_t sample2 = input[i + 1] & 0x0FFF;  // Tomar los 12 bits de la segunda muestra
+    uint32_t bit_buffer = 0;  // Buffer de bits para almacenar las muestras
+    int bit_count = 0;        // Contador de bits almacenados
 
-        // Almacenar las muestras empaquetadas
-        output[output_index++] = (sample1 >> 4) & 0xFF;         // Primer byte con los primeros 8 bits de sample1
-        output[output_index++] = ((sample1 & 0x0F) << 4) | ((sample2 >> 8) & 0x0F);  // Segundo byte: 4 bits restantes de sample1 y primeros 4 de sample2
-        output[output_index++] = sample2 & 0xFF;                // Tercer byte: últimos 8 bits de sample2
+    for (size_t i = 0; i < num_samples; i++) {
+        bit_buffer |= ((uint32_t)(input[i] & 0x0FFF) << bit_count);  // Carga los 12 bits en el buffer
+        bit_count += 12;  // Incrementa el contador de bits
+
+        // Mientras tengamos al menos 8 bits en el buffer, extraemos un byte
+        while (bit_count >= 8) {
+            output[output_index++] = (uint8_t)(bit_buffer & 0xFF);  // Toma los 8 bits más bajos
+            bit_buffer >>= 8;  // Desplaza el buffer
+            bit_count -= 8;    // Reduce el contador de bits
+        }
+    }
+
+    // Si quedan bits residuales en el buffer al final, los almacenamos en el siguiente byte
+    if (bit_count > 0) {
+        output[output_index++] = (uint8_t)(bit_buffer & 0xFF);
     }
 }
 
+#endif
 
 void server_task(void *pvParameters)
 {
@@ -187,12 +198,7 @@ void server_task(void *pvParameters)
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(PORT);
 
-#ifdef USE_TCP
     int listen_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
-#else
-    int listen_sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
-#endif
-
     if (listen_sock < 0) {
         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
         vTaskDelete(NULL);
@@ -209,7 +215,6 @@ void server_task(void *pvParameters)
     }
     ESP_LOGI(TAG, "Socket bound, port %d", PORT);
 
-#ifdef USE_TCP
     err = listen(listen_sock, 1);
     if (err != 0) {
         ESP_LOGE(TAG, "Error occurred during listen: errno %d", errno);
@@ -217,11 +222,10 @@ void server_task(void *pvParameters)
         vTaskDelete(NULL);
         return;
     }
-#endif
+
     while (1) {
         ESP_LOGI(TAG, "Socket listening");
 
-#ifdef USE_TCP
         struct sockaddr_in6 source_addr;
         uint addr_len = sizeof(source_addr);
         int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
@@ -235,13 +239,16 @@ void server_task(void *pvParameters)
 
         transmission_active = true;
         uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
-        uint8_t *compressed_data = (uint8_t *)malloc((DATA_SIZE * 3) / 2);  // Tamaño para datos comprimidos
+        uint8_t *compressed_data = (uint8_t *)malloc((DATA_SIZE * 3) / 2);
 
-        // Enviar datos comprimidos
         while (1) {
             if (xQueueReceive(data_queue, data, portMAX_DELAY) == pdPASS) {
-                pack_12bit_data(data, compressed_data, DATA_SIZE);
+#ifdef ENABLE_COMPRESSION
+                pack_12bit_data_stream(data, compressed_data, DATA_SIZE);
                 int written = send(sock, compressed_data, (DATA_SIZE * 3) / 2, 0);
+#else
+                int written = send(sock, data, DATA_SIZE * sizeof(uint16_t), 0);
+#endif
                 if (written < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
@@ -258,44 +265,7 @@ void server_task(void *pvParameters)
         }
 
         free(data);
-
-#else
-        struct sockaddr_in source_addr;
-        socklen_t addr_len = sizeof(source_addr);
-
-        // Esperar el primer mensaje del cliente para obtener su dirección
-        char buffer[128];
-        int len = recvfrom(listen_sock, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&source_addr, &addr_len);
-        if (len < 0) {
-            ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
-            break;
-        }
-        buffer[len] = '\0'; // Null-terminate the received data
-        ESP_LOGI(TAG, "Received message from client: %s", buffer);
-
-        transmission_active = true;
-
-        uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
-        if (data == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate memory for data");
-            break;
-        }
-
-        // Continuar enviando datos al cliente
-        while (1) {
-            if (xQueueReceive(data_queue, data, portMAX_DELAY) == pdPASS) {
-                int sent = sendto(listen_sock, data, DATA_SIZE * sizeof(uint16_t), 0, (struct sockaddr *)&source_addr, addr_len);
-                if (sent < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                    break;
-                }
-            }
-        }
-
-        transmission_active = false;
-
-        free(data);
-#endif
+        free(compressed_data);
     }
 
     vTaskDelete(NULL);
