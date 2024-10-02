@@ -30,7 +30,7 @@ def unpack_12bit_data(input_data):
         bit_buffer |= input_data[i] << bit_count
         bit_count += 8
 
-        if bit_count >= 12:
+        if bit_count >= 12 and output_index < len(output_data):
             output_data[output_index] = bit_buffer & 0xFFF
             output_index += 1
             bit_buffer >>= 12
