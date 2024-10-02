@@ -1,122 +1,79 @@
 import socket
-import numpy as np
-import struct
-import matplotlib.pyplot as plt
 import threading
+import matplotlib.pyplot as plt
+from collections import deque
 import time
-from queue import Queue
 
-# Parámetros de conexión
-TCP_IP = '192.168.4.1'  # Dirección IP del ESP32 en modo AP o IP del servidor
-TCP_PORT = 8080
-BUFFER_SIZE = 1440  # Tamaño del segmento TCP
 
-# Parámetros de los datos
-DATA_SIZE = 960  # Número de muestras empaquetadas en 1440 bytes
-ADC_MAX_VALUE = 4095
-
-# Cola para pasar los datos entre los hilos
-data_queue = Queue()
 
 def extract_12bit_values(data):
-    """Extraer valores de 12 bits de un flujo de bytes."""
+    """Extraer valores de 12 bits de un flujo de bytes correctamente."""
     values = []
     
-    # Iterar sobre los datos en bloques de 3 bytes
-    for i in range(0, len(data), 3):
-        # Asegurarse de no exceder el tamaño de los datos
-        if i + 2 >= len(data):
-            break
-        
-        # Leer tres bytes
-        byte1 = data[i]
-        byte2 = data[i + 1]
-        byte3 = data[i + 2]
+    for i in range(0, len(data) - 1, 3):  # Procesar cada 3 bytes
+        # Primer valor: toma los 8 bits del primer byte y los 4 más significativos del segundo byte
+        value1 = (data[i] << 4) | (data[i + 1] >> 4)
+        # Segundo valor: toma los 4 bits menos significativos del segundo byte y los 8 bits del tercer byte
+        value2 = ((data[i + 1] & 0x0F) << 8) | data[i + 2]
 
-        # Extraer los 12 bits de la primera muestra
-        value1 = (byte1 << 4) | (byte2 >> 4)
-
-        # Extraer los 12 bits de la segunda muestra
-        value2 = ((byte2 & 0x0F) << 8) | byte3
-
-        # Agregar los valores extraídos a la lista
-        values.append(value1)
-        values.append(value2)
+        values.extend([value1, value2])
 
     return values
 
-# Función de recepción de datos (hilo 1)
-def receive_data():
-    global total_bytes_received
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((TCP_IP, TCP_PORT))
-    start_time = time.time()
-    total_bytes_received = 0
+# Cola para almacenar datos crudos recibidos
+data_queue = deque()
 
+# Función para recibir datos
+def receive_data(sock):
+    global data_queue
+    while True:
+        data = sock.recv(1440)  # Leer 1440 bytes
+        if not data:
+            break
+        data_queue.append(data)  # Agregar los datos crudos a la cola para que sean procesados en otro thread
+
+# Función para descomprimir los datos en un thread aparte
+def decompress_data():
+    global data_queue
+    while True:
+        if len(data_queue) > 0:
+            raw_data = data_queue.popleft()
+            decompressed_values = extract_12bit_values(raw_data)
+            # Aquí podrías hacer más procesamiento o graficar en otro thread
+            plot_data(decompressed_values)
+
+# Función para graficar los datos
+def plot_data(data):
+    plt.clf()
+    plt.plot(data)
+    plt.pause(0.001)
+
+# Función principal
+def main():
+    # Conectar al servidor
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect(('192.168.4.1', 8080))  # Dirección IP del ESP32
+
+    # Iniciar el hilo de recepción
+    receive_thread = threading.Thread(target=receive_data, args=(sock,))
+    receive_thread.daemon = True
+    receive_thread.start()
+
+    # Iniciar el hilo de descompresión
+    decompress_thread = threading.Thread(target=decompress_data)
+    decompress_thread.daemon = True
+    decompress_thread.start()
+
+    # Configurar Matplotlib
+    plt.ion()  # Modo interactivo
+    plt.show()
+
+    # Mantener el programa corriendo
     try:
         while True:
-            # Recibir datos comprimidos
-            data = sock.recv(BUFFER_SIZE)
-            if not data:
-                break
-
-            # Aumentar el contador de bytes recibidos
-            total_bytes_received += len(data)
-
-            # Descomprimir los datos recibidos
-            unpacked_data = unpack_12bit_data(data)
-
-            # Colocar los datos descomprimidos en la cola
-            data_queue.put(unpacked_data)
-
+            time.sleep(1)
     except KeyboardInterrupt:
-        print("Conexión terminada por el usuario.")
-
-    finally:
         sock.close()
 
-# Función de graficación (hilo 2)
-def plot_data():
-    plt.ion()  # Activar modo interactivo de matplotlib
-    fig, ax = plt.subplots()
-    line, = ax.plot([], [], 'b-')
-    ax.set_ylim(0, ADC_MAX_VALUE)
-    ax.set_xlim(0, DATA_SIZE)
-    plt.title("Señal recibida")
-    plt.xlabel("Muestras")
-    plt.ylabel("Valor ADC")
-
-    try:
-        while True:
-            # Si hay datos disponibles en la cola, graficarlos
-            if not data_queue.empty():
-                unpacked_data = data_queue.get()
-                line.set_xdata(np.arange(len(unpacked_data)))
-                line.set_ydata(unpacked_data)
-                plt.draw()
-                plt.pause(0.01)
-
-            # Mostrar velocidad de transmisión (bytes por segundo)
-            elapsed_time = time.time() - start_time
-            if elapsed_time > 0:
-                speed = total_bytes_received / elapsed_time / 1024  # en KB/s
-                print(f"Velocidad de transmisión: {speed:.2f} KB/s")
-
-    except KeyboardInterrupt:
-        print("Graficación terminada por el usuario.")
-
-    finally:
-        plt.ioff()  # Desactivar modo interactivo
-        plt.show()
-
-# Crear hilos para la recepción y la graficación
-receive_thread = threading.Thread(target=receive_data)
-plot_thread = threading.Thread(target=plot_data)
-
-# Iniciar ambos hilos
-receive_thread.start()
-plot_thread.start()
-
-# Esperar a que ambos hilos terminen (opcional)
-receive_thread.join()
-plot_thread.join()
+if __name__ == "__main__":
+    main()
