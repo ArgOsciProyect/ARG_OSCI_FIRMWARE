@@ -20,10 +20,10 @@
 #define WIFI_PASS_AP "12345678"
 #define MAX_STA_CONN 1
 #define PORT 8080
-#define DATA_SIZE (SAMPLE_RATE / SIGNAL_FREQUENCY)  // Tamaño del array para un período completo
+#define DATA_SIZE 1440  // Tamaño del array para un período completo
 #define PI 3.14159265358979323846
 #define SAMPLE_RATE 2000000  // Frecuencia de muestreo en Hz (20 kHz)
-#define DELAY_US (1000000 / SAMPLE_RATE)  // Delay in microseconds for 2 MHz rate
+#define DELAY_US (0.5*DATA_SIZE)  // Delay in microseconds for 2 MHz rate
 #define SIGNAL_FREQUENCY 500000  // Frecuencia de la señal en Hz (1 kHz)
 
 // Define to select protocol (TCP or UDP)
@@ -137,25 +137,41 @@ void wifi_init_sta(void)
 
 void generate_sine_wave_task(void *pvParameters)
 {
-    uint16_t data[DATA_SIZE];
-    for (int i = 0; i < DATA_SIZE; i++) {
-        data[i] = (uint16_t)((sin(2 * PI * i / DATA_SIZE) + 1) * 2047.5); // Scale to 0-4095
+    uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
+    if (data == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for data");
+        vTaskDelete(NULL);
+        return;
     }
 
-    int index = 0;
+    // Generar la onda sinusoidal usando SAMPLE_RATE y SIGNAL_FREQUENCY
+    for (int i = 0; i < DATA_SIZE; i++) {
+        data[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQUENCY * i / SAMPLE_RATE) + 1) * 2047.5); // Escalar a 0-4095
+    }
+
     while (1) {
         if (transmission_active) {
-            if (xQueueSend(data_queue, &data[index], portMAX_DELAY) != pdPASS) {
+            if (xQueueSend(data_queue, data, portMAX_DELAY) != pdPASS) {
                 ESP_LOGE(TAG, "Failed to send data to queue");
             }
-            index = (index + 1) % DATA_SIZE;  // Loop through the data array
-
-            // Busy wait for 500 ns (125 cycles at 240 MHz)
-            uint32_t ccount_start = esp_cpu_get_cycle_count();  // Get the CPU cycle count
-            while (esp_cpu_get_cycle_count() - ccount_start < 125) {
-                // Busy-wait until 125 cycles have passed (~500 ns)
-            }
+            esp_rom_delay_us(DELAY_US);
         }
+    }
+
+    free(data);
+}
+
+void pack_12bit_data(uint16_t *input, uint8_t *output, size_t num_samples) {
+    size_t output_index = 0;
+    for (size_t i = 0; i < num_samples; i += 2) {
+        // Empaquetar dos muestras de 12 bits en 3 bytes
+        uint16_t sample1 = input[i] & 0x0FFF;  // Tomar los 12 bits de la primera muestra
+        uint16_t sample2 = input[i + 1] & 0x0FFF;  // Tomar los 12 bits de la segunda muestra
+
+        // Almacenar las muestras empaquetadas
+        output[output_index++] = (sample1 >> 4) & 0xFF;         // Primer byte con los primeros 8 bits de sample1
+        output[output_index++] = ((sample1 & 0x0F) << 4) | ((sample2 >> 8) & 0x0F);  // Segundo byte: 4 bits restantes de sample1 y primeros 4 de sample2
+        output[output_index++] = sample2 & 0xFF;                // Tercer byte: últimos 8 bits de sample2
     }
 }
 
@@ -202,9 +218,6 @@ void server_task(void *pvParameters)
         return;
     }
 #endif
-
-    uint16_t data;
-
     while (1) {
         ESP_LOGI(TAG, "Socket listening");
 
@@ -221,10 +234,14 @@ void server_task(void *pvParameters)
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
         transmission_active = true;
+        uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
+        uint8_t *compressed_data = (uint8_t *)malloc((DATA_SIZE * 3) / 2);  // Tamaño para datos comprimidos
 
+        // Enviar datos comprimidos
         while (1) {
-            if (xQueueReceive(data_queue, &data, portMAX_DELAY) == pdPASS) {
-                int written = send(sock, &data, sizeof(data), 0);
+            if (xQueueReceive(data_queue, data, portMAX_DELAY) == pdPASS) {
+                pack_12bit_data(data, compressed_data, DATA_SIZE);
+                int written = send(sock, compressed_data, (DATA_SIZE * 3) / 2, 0);
                 if (written < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
@@ -239,6 +256,9 @@ void server_task(void *pvParameters)
             shutdown(sock, 0);
             close(sock);
         }
+
+        free(data);
+
 #else
         struct sockaddr_in source_addr;
         socklen_t addr_len = sizeof(source_addr);
@@ -255,10 +275,16 @@ void server_task(void *pvParameters)
 
         transmission_active = true;
 
+        uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
+        if (data == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate memory for data");
+            break;
+        }
+
         // Continuar enviando datos al cliente
         while (1) {
-            if (xQueueReceive(data_queue, &data, portMAX_DELAY) == pdPASS) {
-                int sent = sendto(listen_sock, &data, sizeof(data), 0, (struct sockaddr *)&source_addr, addr_len);
+            if (xQueueReceive(data_queue, data, portMAX_DELAY) == pdPASS) {
+                int sent = sendto(listen_sock, data, DATA_SIZE * sizeof(uint16_t), 0, (struct sockaddr *)&source_addr, addr_len);
                 if (sent < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
@@ -267,6 +293,8 @@ void server_task(void *pvParameters)
         }
 
         transmission_active = false;
+
+        free(data);
 #endif
     }
 
@@ -297,6 +325,7 @@ void app_main(void)
         return;
     }
 
-    xTaskCreatePinnedToCore(generate_sine_wave_task, "generate_sine_wave_task", 4096, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(server_task, "server_task", 8192, NULL, 5, NULL, 0);
+    // Reducir el tamaño de la pila ya que data ahora se asigna dinámicamente
+    xTaskCreatePinnedToCore(generate_sine_wave_task, "generate_sine_wave_task", 2048, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(server_task, "server_task", 4096, NULL, 5, NULL, 0);
 }

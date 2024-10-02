@@ -1,122 +1,111 @@
 import socket
-import time
-import select
-import threading
+import numpy as np
+import struct
 import matplotlib.pyplot as plt
-from collections import deque
+import threading
+import time
+from queue import Queue
 
-# Configuración del servidor
-HOST = '192.168.100.144'  # IP del AP de la ESP32
-PORT = 8080           # Puerto del servidor
-BUFFER_SIZE = 1440    # Tamaño del buffer para TCP
-BUFFER_SIZE_UDP = 1024 * 32  # Tamaño del buffer para UDP
-USE_TCP = True        # Cambia a False para usar UDP
+# Parámetros de conexión
+TCP_IP = '192.168.4.1'  # Dirección IP del ESP32 en modo AP o IP del servidor
+TCP_PORT = 8080
+BUFFER_SIZE = 1440  # Tamaño del segmento TCP
 
-data_queue = deque(maxlen=1000)  # Cola para almacenar los datos recibidos
+# Parámetros de los datos
+DATA_SIZE = 960  # Número de muestras empaquetadas en 1440 bytes
+ADC_MAX_VALUE = 4095
 
+# Cola para pasar los datos entre los hilos
+data_queue = Queue()
+
+# Función para descomprimir datos de 12 bits empaquetados en 3 bytes
+def unpack_12bit_data(data):
+    unpacked_data = []
+    for i in range(0, len(data), 3):
+        # Tomar 3 bytes y desempaquetarlos en dos muestras de 12 bits
+        byte1 = data[i]
+        byte2 = data[i + 1]
+        byte3 = data[i + 2]
+        
+        sample1 = ((byte1 << 4) | (byte2 >> 4)) & 0x0FFF
+        sample2 = ((byte2 & 0x0F) << 8) | byte3
+        unpacked_data.append(sample1)
+        unpacked_data.append(sample2)
+    
+    return np.array(unpacked_data)
+
+# Función de recepción de datos (hilo 1)
 def receive_data():
-    if USE_TCP:
-        sock_type = socket.SOCK_STREAM
-        protocol = "TCP"
-    else:
-        sock_type = socket.SOCK_DGRAM
-        protocol = "UDP"
+    global total_bytes_received
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((TCP_IP, TCP_PORT))
+    start_time = time.time()
+    total_bytes_received = 0
 
-    with socket.socket(socket.AF_INET, sock_type) as s:
-        server_address = (HOST, PORT)
-        
-        if USE_TCP:
-            s.connect(server_address)
-            print(f"Conectado a {HOST}:{PORT} usando {protocol}")
+    try:
+        while True:
+            # Recibir datos comprimidos
+            data = sock.recv(BUFFER_SIZE)
+            if not data:
+                break
 
-            # Enviar mensaje de handshake
-            handshake_message = "HANDSHAKE"
-            s.sendall(handshake_message.encode())
-            print("Mensaje de handshake enviado")
-        else:
-            print(f"Usando {protocol} para enviar datos a {HOST}:{PORT}")
-            s.sendto(b"DATA_REQUEST", server_address)
+            # Aumentar el contador de bytes recibidos
+            total_bytes_received += len(data)
 
-        total_bytes = 0
-        start_time = time.time()
-        last_packet_time = start_time
-        max_packet_interval = 0
+            # Descomprimir los datos recibidos
+            unpacked_data = unpack_12bit_data(data)
 
-        try:
-            while True:
-                ready = select.select([s], [], [], 1.0)
-                if ready[0]:
-                    packet_start_time = time.time()
-                    if USE_TCP:
-                        data = s.recv(BUFFER_SIZE)
-                    else:
-                        data, _ = s.recvfrom(BUFFER_SIZE_UDP)
-                    
-                    if not data:
-                        break
-                    total_bytes += len(data)
+            # Colocar los datos descomprimidos en la cola
+            data_queue.put(unpacked_data)
 
-                    # Calcular el intervalo entre paquetes
-                    packet_interval = packet_start_time - last_packet_time
-                    last_packet_time = packet_start_time
+    except KeyboardInterrupt:
+        print("Conexión terminada por el usuario.")
 
-                    # Actualizar el tiempo mínimo registrado
-                    if packet_interval > max_packet_interval:
-                        max_packet_interval = packet_interval
+    finally:
+        sock.close()
 
-                    # Añadir datos a la cola
-                    data_queue.extend(data)
-
-                    print(f"Tiempo mínimo entre paquetes: {max_packet_interval:.6f} segundos", end='\r')
-        except KeyboardInterrupt:
-            pass
-
-        end_time = time.time()
-        duration = end_time - start_time
-        speed = total_bytes / duration / 1024 / 1024  # Convertir a MB/s
-
-        print(f"\nTotal de datos recibidos: {total_bytes} bytes")
-        print(f"Duración: {duration:.2f} segundos")
-        print(f"Velocidad de transmisión promedio: {speed:.2f} MB/s")
-
-        # Verificar si la velocidad es suficiente para transmitir la señal
-        required_speed = 4  # MB/s
-        if speed >= required_speed:
-            print("La velocidad es suficiente para transmitir una señal de 16 bits a 2 MHz.")
-        else:
-            print("La velocidad NO es suficiente para transmitir una señal de 16 bits a 2 MHz.")
-        
-        if not USE_TCP:
-            s.sendto(b"SHUTDOWN", server_address)
-
+# Función de graficación (hilo 2)
 def plot_data():
-    plt.ion()
+    plt.ion()  # Activar modo interactivo de matplotlib
     fig, ax = plt.subplots()
-    x_data = deque(maxlen=1000)
-    y_data = deque(maxlen=1000)
-    line, = ax.plot(x_data, y_data)
-    ax.set_ylim(0, 4095)  # Rango de 12 bits
+    line, = ax.plot([], [], 'b-')
+    ax.set_ylim(0, ADC_MAX_VALUE)
+    ax.set_xlim(0, DATA_SIZE)
+    plt.title("Señal recibida")
+    plt.xlabel("Muestras")
+    plt.ylabel("Valor ADC")
 
-    while True:
-        if data_queue:
-            y_data.extend(data_queue)
-            x_data.extend(range(len(y_data)))
-            line.set_xdata(x_data)
-            line.set_ydata(y_data)
-            ax.relim()
-            ax.autoscale_view()
-            plt.draw()
-            plt.pause(0.01)
+    try:
+        while True:
+            # Si hay datos disponibles en la cola, graficarlos
+            if not data_queue.empty():
+                unpacked_data = data_queue.get()
+                line.set_xdata(np.arange(len(unpacked_data)))
+                line.set_ydata(unpacked_data)
+                plt.draw()
+                plt.pause(0.01)
 
-def main():
-    receive_thread = threading.Thread(target=receive_data)
-    plot_thread = threading.Thread(target=plot_data)
+            # Mostrar velocidad de transmisión (bytes por segundo)
+            elapsed_time = time.time() - start_time
+            if elapsed_time > 0:
+                speed = total_bytes_received / elapsed_time / 1024  # en KB/s
+                print(f"Velocidad de transmisión: {speed:.2f} KB/s")
 
-    receive_thread.start()
-    plot_thread.start()
+    except KeyboardInterrupt:
+        print("Graficación terminada por el usuario.")
 
-    receive_thread.join()
-    plot_thread.join()
+    finally:
+        plt.ioff()  # Desactivar modo interactivo
+        plt.show()
 
-if __name__ == "__main__":
-    main()
+# Crear hilos para la recepción y la graficación
+receive_thread = threading.Thread(target=receive_data)
+plot_thread = threading.Thread(target=plot_data)
+
+# Iniciar ambos hilos
+receive_thread.start()
+plot_thread.start()
+
+# Esperar a que ambos hilos terminen (opcional)
+receive_thread.join()
+plot_thread.join()
