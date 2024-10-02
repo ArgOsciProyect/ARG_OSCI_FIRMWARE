@@ -7,23 +7,30 @@ PORT = 3333           # Puerto configurado en el código C
 
 # Tamaño del buffer que coincide con BUFFER_SIZE del ESP32
 BUFFER_SIZE = 1440 * 2 * 6  # 1024 muestras de 16 bits (2 bytes por muestra)
-COMPRESSED_BUFFER_SIZE = (BUFFER_SIZE * 3) // 4  # Tamaño del buffer comprimido
+COMPRESSED_BUFFER_SIZE = (BUFFER_SIZE * 12 + 7) // 8  # Tamaño del buffer comprimido
 
-def unpack_12bit_data(compressed_data):
-    num_samples = (len(compressed_data) * 2) // 3
+def unpack_12bit_data_fifo(compressed_data):
     decompressed_data = []
+    bit_index = 0
+    total_bits = len(compressed_data) * 8
 
-    for i in range(0, len(compressed_data), 3):
-        # Desempaquetar tres bytes en dos muestras de 12 bits
-        byte1 = compressed_data[i]
-        byte2 = compressed_data[i + 1]
-        byte3 = compressed_data[i + 2]
+    while bit_index + 12 <= total_bits:
+        byte_index = bit_index // 8
+        bit_offset = bit_index % 8
 
-        sample1 = (byte1 << 4) | (byte2 >> 4)
-        sample2 = ((byte2 & 0x0F) << 8) | byte3
+        # Leer 12 bits del buffer comprimido
+        sample = 0
+        for i in range(12):
+            if compressed_data[byte_index] & (1 << (7 - bit_offset)):
+                sample |= (1 << (11 - i))
 
-        decompressed_data.append(sample1)
-        decompressed_data.append(sample2)
+            bit_offset += 1
+            if bit_offset == 8:
+                bit_offset = 0
+                byte_index += 1
+
+        decompressed_data.append(sample)
+        bit_index += 12
 
     return decompressed_data
 
@@ -42,7 +49,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if not compressed_data:
                 break
 
-            decompressed_data = unpack_12bit_data(compressed_data)
+            decompressed_data = unpack_12bit_data_fifo(compressed_data)
             total_bytes += len(decompressed_data) * 2  # Cada muestra es de 2 bytes
 
             # Medir el tiempo cada 10 segundos
