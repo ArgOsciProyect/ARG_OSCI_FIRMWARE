@@ -1,18 +1,45 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 #include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
+
+#include "esp_log.h"
+#include "driver/spi_slave.h"
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"
+#include "lwip/sockets.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "esp_log.h"
 #include "nvs_flash.h"
-#include "lwip/sockets.h"
 #include "esp_netif.h"
-#include "esp_timer.h"
-#include "esp_system.h"  // Include the header for esp_cpu_get_cycle_count()
 #include "esp_system.h"
+
+// Definición de pines para HSPI (modo esclavo)
+#define GPIO_HANDSHAKE 2
+#define PIN_NUM_MISO 12
+#define PIN_NUM_MOSI 13
+#define PIN_NUM_CLK  14
+#define PIN_NUM_CS   15
+
+// Definición de pines para VSPI (modo maestro)
+#define PIN_NUM_MISO_TX 19
+#define PIN_NUM_MOSI_TX 23
+#define PIN_NUM_CLK_TX  18
+#define PIN_NUM_CS_TX   5
+
+// Tamaño del buffer de recepción y transmisión
+#define BUFFER_SIZE 1024
+
+// Parámetros de la señal
+#define SAMPLE_RATE 2000000  // Frecuencia de muestreo 2 MHz
+#define SIGNAL_FREQ 100000   // Frecuencia de la señal 100 kHz
+#define PI 3.14159265359
 
 #define WIFI_SSID_STA "IPLAN-1_D"
 #define WIFI_PASS_STA "santiagojoaquin"
@@ -20,27 +47,78 @@
 #define WIFI_PASS_AP "12345678"
 #define MAX_STA_CONN 1
 #define PORT 8080
-#define DATA_SIZE 1440  // Tamaño del array para un período completo
-#define PI 3.14159265358979323846
-#define SAMPLE_RATE 2000000  // Frecuencia de muestreo en Hz (20 kHz)
-#define DELAY_US (0.5*DATA_SIZE)  // Delay in microseconds for 2 MHz rate
-#define SIGNAL_FREQUENCY 500000  // Frecuencia de la señal en Hz (1 kHz)
-
-// Define to select protocol (TCP or UDP)
-#define USE_TCP
-
-// Define to select mode (AP or STA)
-#define USE_AP
-
-#define ENABLE_COMPRESSION  // Definir para habilitar compresión
 
 static const char *TAG = "wifi_example";
 const int WIFI_CONNECTED_BIT = BIT0;
+static EventGroupHandle_t s_wifi_event_group;
 
-QueueHandle_t data_queue;
-volatile bool transmission_active = false;
+// Buffers
 
-#ifdef USE_AP
+// Definir el canal DMA
+#define DMA_CHANNEL_RX 1
+#define DMA_CHANNEL_TX 2
+
+spi_device_handle_t spi;  // Manejador del dispositivo SPI
+int sock;  // Socket para la transmisión de datos
+
+// Contadores de datos
+volatile int datos_enviados = 0;
+volatile int datos_recibidos = 0;
+
+// Configuración del SPI en modo esclavo
+void my_spi_slave_initialize() {
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = PIN_NUM_MOSI,
+        .miso_io_num = PIN_NUM_MISO,
+        .sclk_io_num = PIN_NUM_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1
+    };
+
+    spi_slave_interface_config_t slvcfg = {
+        .spics_io_num = PIN_NUM_CS,
+        .flags = 0,
+        .queue_size = 3,
+        .mode = 0,
+        .post_setup_cb = NULL,
+        .post_trans_cb = NULL
+    };
+
+    gpio_set_direction(GPIO_HANDSHAKE, GPIO_MODE_OUTPUT);
+
+    // Inicializar el bus SPI en modo esclavo
+    ESP_ERROR_CHECK(spi_slave_initialize(HSPI_HOST, &buscfg, &slvcfg, DMA_CHANNEL_RX));
+}
+
+// Configuración del SPI en modo maestro para transmisión
+void my_spi_master_initialize() {
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = PIN_NUM_MOSI_TX,
+        .miso_io_num = PIN_NUM_MISO_TX,
+        .sclk_io_num = PIN_NUM_CLK_TX,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1
+    };
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 70 * 1000 * 1000,  // 30 MHz
+        .mode = 0,
+        .spics_io_num = PIN_NUM_CS_TX,
+        .queue_size = 3,
+    };
+
+    // Inicializar el bus SPI en modo maestro
+    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &buscfg, DMA_CHANNEL_TX));
+    // Añadir el dispositivo SPI al bus
+    ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &devcfg, &spi));
+}
+
+// Generar la señal senoidal de 100 kHz
+void generate_sine_wave() {
+
+}
+
+// Configurar la ESP32 como Access Point
 void wifi_init_softap(void)
 {
     esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
@@ -73,6 +151,7 @@ void wifi_init_softap(void)
     // Set the required Wi-Fi configurations
     ESP_ERROR_CHECK(esp_wifi_set_protocol(ESP_IF_WIFI_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_AP, WIFI_BW_HT40));  // Set 40 MHz bandwidth
+    //ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(ESP_IF_WIFI_AP, WIFI_PHY_RATE_MCS7_LGI));  // Set 6 Mbps data rate
     
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -80,199 +159,77 @@ void wifi_init_softap(void)
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", WIFI_SSID_AP, WIFI_PASS_AP);
 }
-#else
-static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
-{
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "Disconnected. Reconnecting...");
-        esp_wifi_connect();
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Got IP: %s", ip4addr_ntoa(&event->ip_info.ip));
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
 
-void wifi_init_sta(void)
-{
-    s_wifi_event_group = xEventGroupCreate();
-
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, NULL));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = WIFI_SSID_STA,
-            .password = WIFI_PASS_STA,
-        },
-    };
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-
-    // Set the required Wi-Fi configurations
-    ESP_ERROR_CHECK(esp_wifi_set_protocol(ESP_IF_WIFI_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
-    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));  // Set 40 MHz bandwidth
-    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(19));  // Set max transmit power to 19 dBm
-
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_sta finished. SSID:%s password:%s", WIFI_SSID_STA, WIFI_PASS_STA);
-
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to AP");
-    } else {
-        ESP_LOGE(TAG, "Failed to connect to AP");
-    }
-}
-#endif
-
-void generate_sine_wave_task(void *pvParameters)
-{
-    uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
-    if (data == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for data");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    for (int i = 0; i < DATA_SIZE; i++) {
-        data[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQUENCY * i / SAMPLE_RATE) + 1) * 2047.5);
-    }
-
-    while (1) {
-        if (transmission_active) {
-            if (xQueueSend(data_queue, data, portMAX_DELAY) != pdPASS) {
-                ESP_LOGE(TAG, "Failed to send data to queue");
-            }
-            esp_rom_delay_us(DELAY_US);
-        }
-    }
-
-    free(data);
-}
-
-#ifdef ENABLE_COMPRESSION
-void pack_12bit_data_stream(uint16_t *input, uint8_t *output, size_t num_samples) {
-    size_t output_index = 0;
-    uint32_t bit_buffer = 0;  // Buffer de bits para almacenar las muestras
-    int bit_count = 0;        // Contador de bits almacenados
-
-    for (size_t i = 0; i < num_samples; i++) {
-        bit_buffer |= ((uint32_t)(input[i] & 0x0FFF) << bit_count);  // Carga los 12 bits en el buffer
-        bit_count += 12;  // Incrementa el contador de bits
-
-        // Mientras tengamos al menos 8 bits en el buffer, extraemos un byte
-        while (bit_count >= 8) {
-            output[output_index++] = (uint8_t)(bit_buffer & 0xFF);  // Toma los 8 bits más bajos
-            bit_buffer >>= 8;  // Desplaza el buffer
-            bit_count -= 8;    // Reduce el contador de bits
-        }
-    }
-
-    // Si quedan bits residuales en el buffer al final, los almacenamos en el siguiente byte
-    if (bit_count > 0) {
-        output[output_index++] = (uint8_t)(bit_buffer & 0xFF);
-    }
-}
-
-#endif
-
-void server_task(void *pvParameters)
-{
-    char addr_str[128];
-    int addr_family = AF_INET;
-    int ip_protocol = IPPROTO_IP;
+// Crear socket para enviar los datos
+void socket_create() {
     struct sockaddr_in dest_addr;
-
     dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(PORT);
+    dest_addr.sin_port = htons(3333);
 
-    int listen_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
-    if (listen_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-        vTaskDelete(NULL);
-        return;
-    }
-    ESP_LOGI(TAG, "Socket created");
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    listen(sock, 1);
 
-    int err = bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-    if (err != 0) {
-        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
-        close(listen_sock);
-        vTaskDelete(NULL);
-        return;
-    }
-    ESP_LOGI(TAG, "Socket bound, port %d", PORT);
+    printf("Esperando conexión de un cliente...\n");
+    struct sockaddr_in source_addr;
+    uint addr_len = sizeof(source_addr);
+    sock = accept(sock, (struct sockaddr *)&source_addr, &addr_len);
 
-    err = listen(listen_sock, 1);
-    if (err != 0) {
-        ESP_LOGE(TAG, "Error occurred during listen: errno %d", errno);
-        close(listen_sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    while (1) {
-        ESP_LOGI(TAG, "Socket listening");
-
-        struct sockaddr_in6 source_addr;
-        uint addr_len = sizeof(source_addr);
-        int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
-        if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
-            break;
-        }
-
-        inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr.s_addr, addr_str, sizeof(addr_str) - 1);
-        ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
-
-        transmission_active = true;
-        uint16_t *data = (uint16_t *)malloc(DATA_SIZE * sizeof(uint16_t));
-        uint8_t *compressed_data = (uint8_t *)malloc((DATA_SIZE * 3) / 2);
-
-        while (1) {
-            if (xQueueReceive(data_queue, data, portMAX_DELAY) == pdPASS) {
-#ifdef ENABLE_COMPRESSION
-                pack_12bit_data_stream(data, compressed_data, DATA_SIZE);
-                int written = send(sock, compressed_data, (DATA_SIZE * 3) / 2, 0);
-#else
-                int written = send(sock, data, DATA_SIZE * sizeof(uint16_t), 0);
-#endif
-                if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                    break;
-                }
-            }
-        }
-
-        transmission_active = false;
-
-        if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
-            shutdown(sock, 0);
-            close(sock);
-        }
-
-        free(data);
-        free(compressed_data);
-    }
-
-    vTaskDelete(NULL);
+    printf("Cliente conectado\n");
 }
 
-void app_main(void)
-{
+// Tarea para manejar la recepción de datos y enviarlos al socket
+void spi_slave_task(void *arg) {
+    uint16_t rx_buffer[BUFFER_SIZE];
+    spi_slave_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = BUFFER_SIZE * 16;  // 16 bits por dato
+    t.rx_buffer = rx_buffer;
+
+    while (1) {
+        // Esperar a que llegue una transacción
+        ESP_ERROR_CHECK(spi_slave_transmit(HSPI_HOST, &t, portMAX_DELAY));
+
+        // Contar los datos recibidos
+        //datos_recibidos += BUFFER_SIZE;
+
+        // Enviar los datos por el socket
+        send(sock, rx_buffer, BUFFER_SIZE * sizeof(uint16_t), 0);
+
+        // Imprimir el contador de datos recibidos
+        //printf("Datos recibidos: %d\n", datos_recibidos);
+    }
+}
+
+// Tarea para transmitir los datos a través del SPI maestro
+void spi_master_task(void *arg) {
+    uint16_t tx_buffer[BUFFER_SIZE];
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        float t = (float)i / SAMPLE_RATE;  // Tiempo en segundos para cada muestra
+        tx_buffer[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQ * t) + 1) * (2047));  // Señal normalizada a 12 bits
+    }
+
+    spi_device_handle_t spi = (spi_device_handle_t)arg;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = BUFFER_SIZE * 16;  // 16 bits por dato
+    t.tx_buffer = tx_buffer;
+
+    while (1) {
+        // Transmitir los datos
+        ESP_ERROR_CHECK(spi_device_transmit(spi, &t));  // Transmitir los datos
+        datos_enviados += BUFFER_SIZE;
+
+        // Imprimir el contador de datos enviados
+        //printf("Datos enviados: %d\n", datos_enviados);
+
+        //esp_rom_delay_us(BUFFER_SIZE/2);
+    }
+}
+
+void app_main() {
+    
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -283,19 +240,24 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-#ifdef USE_AP
+    // Configurar el AP Wi-Fi
     wifi_init_softap();
-#else
-    wifi_init_sta();
-#endif
 
-    data_queue = xQueueCreate(10, DATA_SIZE * sizeof(uint16_t));
-    if (data_queue == NULL) {
-        ESP_LOGE(TAG, "Failed to create queue");
-        return;
-    }
+    // Inicializar el SPI en modo esclavo
+    my_spi_slave_initialize();
 
-    // Reducir el tamaño de la pila ya que data ahora se asigna dinámicamente
-    xTaskCreatePinnedToCore(generate_sine_wave_task, "generate_sine_wave_task", 2048, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(server_task, "server_task", 4096, NULL, 5, NULL, 0);
+    // Inicializar el SPI en modo maestro
+    my_spi_master_initialize();
+
+    // Generar la señal senoidal
+    generate_sine_wave();
+
+    // Crear el socket
+    socket_create();
+
+    // Crear la tarea de recepción de datos en core 0
+    xTaskCreatePinnedToCore(spi_slave_task, "spi_slave_task", 4096, NULL, 5, NULL, 0);
+
+    // Crear la tarea de transmisión de datos en core 1 y pasar el manejador del dispositivo SPI
+    xTaskCreatePinnedToCore(spi_master_task, "spi_master_task", 4096, (void*)spi, 5, NULL, 1);
 }
