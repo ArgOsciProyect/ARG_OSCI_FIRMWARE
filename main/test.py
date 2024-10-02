@@ -13,6 +13,8 @@ SAMPLES = DATA_SIZE // 2  # Número de muestras (2 bytes por muestra)
 
 # Variables globales para almacenamiento y control
 data_buffer = np.zeros(SAMPLES, dtype=np.uint16)
+raw_data_buffer = []
+total_bytes_received = 0  # Para el cálculo de velocidad
 transmission_speed = 0
 is_compressed = False
 transmission_active = True
@@ -40,10 +42,8 @@ def unpack_12bit_data(input_data):
 
 # Hilo para recibir los datos desde la ESP32
 def receive_data(sock):
-    global data_buffer, transmission_speed, transmission_active
+    global raw_data_buffer, total_bytes_received, transmission_active
 
-    time_start = time.time()
-    total_bytes = 0  # Contador para medir la velocidad
     while transmission_active:
         try:
             # Recepción de datos desde la ESP32
@@ -51,33 +51,47 @@ def receive_data(sock):
             if not raw_data:
                 break  # Desconexión o error en la recepción
 
-            # Descomprimir o procesar los datos
+            # Almacenar los datos crudos en el buffer
             with buffer_lock:
-                if is_compressed:
-                    data_buffer = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
-                else:
-                    data_buffer = np.frombuffer(raw_data, dtype=np.uint16)
+                raw_data_buffer.append(raw_data)
 
-            total_bytes += len(raw_data)
-            # Actualizar la velocidad de transmisión
-            elapsed_time = time.time() - time_start
-            if elapsed_time > 1:  # Actualizar cada segundo
-                transmission_speed = total_bytes / elapsed_time
-                time_start = time.time()
-                total_bytes = 0
+            total_bytes_received += len(raw_data)
 
         except socket.error as e:
             print(f"Error receiving data: {e}")
             transmission_active = False
             break
 
-# Hilo para calcular la velocidad de transmisión
-def calculate_speed():
-    global transmission_speed, transmission_active
+# Hilo para descomprimir los datos
+def decompress_data():
+    global raw_data_buffer, data_buffer, transmission_active
 
     while transmission_active:
-        time.sleep(1)  # Calcula la velocidad cada segundo
-        print(f"Velocidad de transmisión: {transmission_speed / 1024:.2f} KB/s")
+        if raw_data_buffer:
+            with buffer_lock:
+                raw_data = raw_data_buffer.pop(0)
+
+            if is_compressed:
+                decompressed_data = unpack_12bit_data(np.frombuffer(raw_data, dtype=np.uint8))
+            else:
+                decompressed_data = np.frombuffer(raw_data, dtype=np.uint16)
+
+            with buffer_lock:
+                data_buffer[:] = decompressed_data
+
+        time.sleep(0.01)  # Ajustar según la necesidad de procesamiento
+
+# Hilo para calcular la velocidad de transmisión
+def calculate_speed():
+    global total_bytes_received, transmission_speed, transmission_active
+
+    previous_bytes = 0
+    while transmission_active:
+        time.sleep(1)  # Calcular cada segundo
+        with buffer_lock:
+            transmission_speed = (total_bytes_received - previous_bytes) / 1024  # En KB/s
+            previous_bytes = total_bytes_received
+        print(f"Velocidad de transmisión: {transmission_speed:.2f} KB/s")
 
 # Función para graficar los datos
 def plot_data():
@@ -116,6 +130,10 @@ def main():
     receiver_thread = threading.Thread(target=receive_data, args=(sock,))
     receiver_thread.start()
 
+    # Crear y comenzar el hilo para descomprimir los datos
+    decompression_thread = threading.Thread(target=decompress_data, daemon=True)
+    decompression_thread.start()
+
     # Crear y comenzar el hilo para calcular la velocidad
     speed_thread = threading.Thread(target=calculate_speed, daemon=True)
     speed_thread.start()
@@ -127,6 +145,8 @@ def main():
         print("Deteniendo transmisión...")
         transmission_active = False
         receiver_thread.join()
+        decompression_thread.join()
+        speed_thread.join()
         sock.close()
 
 if __name__ == "__main__":
