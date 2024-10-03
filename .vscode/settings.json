@@ -6,7 +6,15 @@
     "math.h": "c",
     "sockets.h": "c",
     "nvs_flash.h": "c",
-    "esp_system.h": "c"
+    "esp_system.h": "c",
+    "*.tcc": "c",
+    "complex": "c",
+    "fstream": "c",
+    "iomanip": "c",
+    "istream": "c",
+    "ostream": "c",
+    "regex": "c",
+    "*.inc": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",

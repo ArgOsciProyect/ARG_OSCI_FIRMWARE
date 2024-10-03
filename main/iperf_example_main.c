@@ -34,7 +34,10 @@
 #define PIN_NUM_CS_TX   5
 
 // Tamaño del buffer de recepción y transmisión
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 1440
+
+#define SEND_MULTIPLIER 6  // Multiplicador de envío: número de recepciones a acumular
+
 
 // Parámetros de la señal
 #define SAMPLE_RATE 2000000  // Frecuencia de muestreo 2 MHz
@@ -78,7 +81,7 @@ void my_spi_slave_initialize() {
     spi_slave_interface_config_t slvcfg = {
         .spics_io_num = PIN_NUM_CS,
         .flags = 0,
-        .queue_size = 3,
+        .queue_size = 10,
         .mode = 0,
         .post_setup_cb = NULL,
         .post_trans_cb = NULL
@@ -101,10 +104,10 @@ void my_spi_master_initialize() {
     };
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 70 * 1000 * 1000,  // 30 MHz
+        .clock_speed_hz = 80 * 1000 * 1000,  // 30 MHz
         .mode = 0,
         .spics_io_num = PIN_NUM_CS_TX,
-        .queue_size = 3,
+        .queue_size = 10,
     };
 
     // Inicializar el bus SPI en modo maestro
@@ -151,11 +154,11 @@ void wifi_init_softap(void)
     // Set the required Wi-Fi configurations
     ESP_ERROR_CHECK(esp_wifi_set_protocol(ESP_IF_WIFI_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_AP, WIFI_BW_HT40));  // Set 40 MHz bandwidth
-    //ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(ESP_IF_WIFI_AP, WIFI_PHY_RATE_MCS7_LGI));  // Set 6 Mbps data rate
+    //ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(ESP_IF_WIFI_AP, WIFI_PHY_RATE_54M));  // Set 6 Mbps data rate
     
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(19));  // Set max transmit power to 19 dBm
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(30));  // Set max transmit power to 19 dBm
 
     ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s", WIFI_SSID_AP, WIFI_PASS_AP);
 }
@@ -181,21 +184,29 @@ void socket_create() {
 
 // Tarea para manejar la recepción de datos y enviarlos al socket
 void spi_slave_task(void *arg) {
-    uint16_t rx_buffer[BUFFER_SIZE];
+    // Asegurarse de que el buffer esté alineado a 4 bytes
+    uint16_t rx_buffer[BUFFER_SIZE] __attribute__((aligned(4)));
+    uint16_t accumulated_buffer[SEND_MULTIPLIER * BUFFER_SIZE];  // Buffer para acumular recepciones
     spi_slave_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = BUFFER_SIZE * 16;  // 16 bits por dato
     t.rx_buffer = rx_buffer;
 
+    int reception_count = 0;
+
     while (1) {
         // Esperar a que llegue una transacción
         ESP_ERROR_CHECK(spi_slave_transmit(HSPI_HOST, &t, portMAX_DELAY));
 
-        // Contar los datos recibidos
-        //datos_recibidos += BUFFER_SIZE;
+        // Copiar los datos recibidos al buffer acumulado
+        memcpy(&accumulated_buffer[reception_count * BUFFER_SIZE], rx_buffer, BUFFER_SIZE * sizeof(uint16_t));
+        reception_count++;
 
-        // Enviar los datos por el socket
-        send(sock, rx_buffer, BUFFER_SIZE * sizeof(uint16_t), 0);
+        // Si se han acumulado SEND_MULTIPLIER recepciones, enviar los datos por el socket
+        if (reception_count == SEND_MULTIPLIER) {
+            send(sock, accumulated_buffer, SEND_MULTIPLIER * BUFFER_SIZE * sizeof(uint16_t), 0);
+            reception_count = 0;  // Reiniciar el contador de recepciones
+        }
 
         // Imprimir el contador de datos recibidos
         //printf("Datos recibidos: %d\n", datos_recibidos);
@@ -204,7 +215,7 @@ void spi_slave_task(void *arg) {
 
 // Tarea para transmitir los datos a través del SPI maestro
 void spi_master_task(void *arg) {
-    uint16_t tx_buffer[BUFFER_SIZE];
+    uint16_t tx_buffer[BUFFER_SIZE] __attribute__((aligned(4)));
     for (int i = 0; i < BUFFER_SIZE; i++) {
         float t = (float)i / SAMPLE_RATE;  // Tiempo en segundos para cada muestra
         tx_buffer[i] = (uint16_t)((sin(2 * PI * SIGNAL_FREQ * t) + 1) * (2047));  // Señal normalizada a 12 bits
@@ -219,7 +230,7 @@ void spi_master_task(void *arg) {
     while (1) {
         // Transmitir los datos
         ESP_ERROR_CHECK(spi_device_transmit(spi, &t));  // Transmitir los datos
-        datos_enviados += BUFFER_SIZE;
+        //datos_enviados += BUFFER_SIZE;
 
         // Imprimir el contador de datos enviados
         //printf("Datos enviados: %d\n", datos_enviados);
@@ -243,6 +254,9 @@ void app_main() {
     // Configurar el AP Wi-Fi
     wifi_init_softap();
 
+    // Crear el socket
+    socket_create();
+
     // Inicializar el SPI en modo esclavo
     my_spi_slave_initialize();
 
@@ -252,12 +266,9 @@ void app_main() {
     // Generar la señal senoidal
     generate_sine_wave();
 
-    // Crear el socket
-    socket_create();
-
     // Crear la tarea de recepción de datos en core 0
-    xTaskCreatePinnedToCore(spi_slave_task, "spi_slave_task", 4096, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(spi_slave_task, "spi_slave_task", BUFFER_SIZE*SEND_MULTIPLIER*2.5, NULL, 5, NULL, 0);
 
     // Crear la tarea de transmisión de datos en core 1 y pasar el manejador del dispositivo SPI
-    xTaskCreatePinnedToCore(spi_master_task, "spi_master_task", 4096, (void*)spi, 5, NULL, 1);
+    xTaskCreatePinnedToCore(spi_master_task, "spi_master_task", BUFFER_SIZE*SEND_MULTIPLIER*2.5, (void*)spi, 5, NULL, 1);
 }
