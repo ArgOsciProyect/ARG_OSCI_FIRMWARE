@@ -1,0 +1,28 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.port": "/dev/ttyUSB1",
+  "idf.flashType": "UART",
+  "idf.adapterTargetName": "esp32",
+  "files.associations": {
+    "esp_log.h": "c",
+    "spi_slave.h": "c",
+    "sockets.h": "c",
+    "esp_timer.h": "c",
+    "esp_err.h": "c",
+    "freertos.h": "c",
+    "esp_compiler.h": "c",
+    "soc_caps.h": "c",
+    "compare": "c",
+    "cstdint": "c",
+    "string.h": "c"
+  },
+  "idf.espIdfPath": "/home/joaquin/esp/v5.1.4/esp-idf",
+  "idf.pythonBinPath": "/home/joaquin/.espressif/python_env/idf5.1_py3.12_env/bin/python",
+  "idf.toolsPath": "/home/joaquin/.espressif",
+  "idf.customExtraPaths": "/home/joaquin/.espressif/tools/xtensa-esp-elf-gdb/12.1_20231023/xtensa-esp-elf-gdb/bin:/home/joaquin/.espressif/tools/riscv32-esp-elf-gdb/12.1_20231023/riscv32-esp-elf-gdb/bin:/home/joaquin/.espressif/tools/xtensa-esp32-elf/esp-12.2.0_20230208/xtensa-esp32-elf/bin:/home/joaquin/.espressif/tools/xtensa-esp32s2-elf/esp-12.2.0_20230208/xtensa-esp32s2-elf/bin:/home/joaquin/.espressif/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208/xtensa-esp32s3-elf/bin:/home/joaquin/.espressif/tools/riscv32-esp-elf/esp-12.2.0_20230208/riscv32-esp-elf/bin:/home/joaquin/.espressif/tools/esp32ulp-elf/2.35_20220830/esp32ulp-elf/bin:/home/joaquin/.espressif/tools/cmake/3.24.0/bin:/home/joaquin/.espressif/tools/openocd-esp32/v0.12.0-esp32-20230921/openocd-esp32/bin:/home/joaquin/.espressif/tools/ninja/1.10.2:/home/joaquin/.espressif/tools/esp-rom-elfs/20230320",
+  "idf.customExtraVars": {
+    "OPENOCD_SCRIPTS": "/home/joaquin/.espressif/tools/openocd-esp32/v0.12.0-esp32-20230921/openocd-esp32/share/openocd/scripts",
+    "ESP_ROM_ELF_DIR": "/home/joaquin/.espressif/tools/esp-rom-elfs/20230320/"
+  },
+  "idf.gitPath": "git"
+}

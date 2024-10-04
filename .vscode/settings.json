@@ -14,7 +14,16 @@
     "istream": "c",
     "ostream": "c",
     "regex": "c",
-    "*.inc": "c"
+    "*.inc": "c",
+    "spi_common.h": "c",
+    "esp_err.h": "c",
+    "spi_types.h": "c",
+    "esp_timer.h": "c",
+    "esp_log.h": "c",
+    "stdarg.h": "c",
+    "esp_event.h": "c",
+    "esp_wifi.h": "c",
+    "esp_rom_sys.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
