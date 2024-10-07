@@ -14,7 +14,7 @@
 #define WIFI_PASS "12345678"
 #define TCP_PORT 8080
 #define MAX_CLIENTS 1
-#define ADC_CHANNEL ADC_CHANNEL_3
+#define ADC_CHANNEL ADC_CHANNEL_0
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define ADC_RESOLUTION 9 // 9-bit resolution
 #define BUF_SIZE 4096
@@ -88,12 +88,10 @@ void unpack_data_task(void *pvParameters) {
                 // Desempaquetar datos y almacenarlos en el buffer compartido
                 xSemaphoreTake(buffer_semaphore, portMAX_DELAY);
                 uint16_t *unpacked_ptr = unpacked_buffer;
-                for (uint32_t i = 0; i < len; i += 6) { // Asumiendo que cada bloque de datos tiene 6 bytes
-                    // Imprimir los valores de los 6 bytes
-                    ESP_LOGI(TAG, "Bytes: %02X %02X %02X %02X %02X %02X",
-                             buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3], buffer[i + 4], buffer[i + 5]);
-                    sleep(100);
-                    // Aquí puedes decidir qué bytes usar basándote en la salida
+                for (uint32_t i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                    adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                    // Copiar los datos desempaquetados en el buffer compartido
+                    *unpacked_ptr++ = adc_data->type1.data;
                 }
                 xSemaphoreGive(buffer_semaphore);
             } else {
