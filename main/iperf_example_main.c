@@ -20,6 +20,18 @@
 #define BUF_SIZE 4096
 #define UNPACKED_BUF_SIZE (BUF_SIZE / sizeof(adc_digi_output_data_t))
 
+//Define for 8 bits transfer
+//#define TRANSFER_BITS_8
+
+#ifdef TRANSFER_BITS_8
+    #define UNPACKED_BUF_SIZE (BUF_SIZE / sizeof(uint8_t))
+    uint8_t unpacked_buffer[UNPACKED_BUF_SIZE];
+#else
+    #define UNPACKED_BUF_SIZE (BUF_SIZE / sizeof(uint16_t))
+    uint16_t unpacked_buffer[UNPACKED_BUF_SIZE];
+#endif
+
+
 static const char *TAG = "ARG_OSCI";
 int client_socket = -1;
 bool client_connected = false;
@@ -30,7 +42,6 @@ EventGroupHandle_t wifi_event_group;
 const int WIFI_CONNECTED_BIT = BIT0;
 
 // Buffer compartido y semáforo
-uint16_t unpacked_buffer[UNPACKED_BUF_SIZE];
 SemaphoreHandle_t buffer_semaphore;
 
 // Configuración y muestreo continuo del ADC
@@ -87,12 +98,21 @@ void unpack_data_task(void *pvParameters) {
             if (ret == ESP_OK && len > 0) {
                 // Desempaquetar datos y almacenarlos en el buffer compartido
                 xSemaphoreTake(buffer_semaphore, portMAX_DELAY);
-                uint16_t *unpacked_ptr = unpacked_buffer;
-                for (uint32_t i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                    adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                    // Copiar los datos desempaquetados en el buffer compartido
-                    *unpacked_ptr++ = adc_data->type1.data;
-                }
+                #ifdef TRANSFER_BITS_8
+                    uint8_t *unpacked_ptr = unpacked_buffer;
+                    for (uint32_t i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                        adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                        // Transferir solo 8 bits (descartar el bit menos significativo)
+                        *unpacked_ptr++ = (uint8_t)(adc_data->type1.data >> 1);
+                    }
+                #else
+                    uint16_t *unpacked_ptr = unpacked_buffer;
+                    for (uint32_t i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                        adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                        // Transferir los 9 bits completos
+                        *unpacked_ptr++ = adc_data->type1.data;
+                    }
+                #endif
                 xSemaphoreGive(buffer_semaphore);
             } else {
                 ESP_LOGE(TAG, "Error reading ADC data: %d", ret);
