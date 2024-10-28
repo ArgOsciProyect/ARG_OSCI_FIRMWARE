@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "iperf",
-    "project_version":    "80a12e6-dirty",
+    "project_version":    "fc02354-dirty",
     "project_path":       "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI",
     "idf_path":           "/home/joaquin/esp/v5.3.1/esp-idf",
     "build_dir":          "/home/joaquin/Facu/TESIS/ARG_OSCI/ARG_OSCI/build",

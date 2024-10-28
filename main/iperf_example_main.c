@@ -11,19 +11,21 @@
 #include "esp_netif.h"
 #include "driver/dac_cosine.h"  // Cambiamos la librería para el DAC
 #include "esp_timer.h"
+#include "driver/gpio.h"
+
 #include <math.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASS "12345678"
 #define TCP_PORT 8080
 #define MAX_CLIENTS 1
-#define ADC_CHANNEL ADC_CHANNEL_0
+#define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define ADC_RESOLUTION 9 // 9-bit resolution
 #define BUF_SIZE 4096
 
 // Define for 8 bits transfer
-//#define TRANSFER_BITS_8
+#define TRANSFER_BITS_8
 
 #ifdef TRANSFER_BITS_8
     #define UNPACKED_BUF_SIZE (BUF_SIZE / sizeof(uint8_t))
@@ -50,13 +52,13 @@ void start_adc_sampling() {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
     adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_0,  
+        .atten = ADC_ATTEN_DB_11,  
         .channel = ADC_CHANNEL,   
         .bit_width = ADC_BITWIDTH_9
     };
 
     adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = 4096*2,
+        .max_store_buf_size = 4096,
         .conv_frame_size = 128,
     };
 
@@ -165,8 +167,8 @@ void send_data_task(void *pvParameters) {
 void init_sine_wave() {
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
-        .chan_id = DAC_CHAN_0,
-        .freq_hz = 10000,             // Frecuencia de la señal senoidal en Hz
+        .chan_id = DAC_CHAN_1,
+        .freq_hz = 500,             // Frecuencia de la señal senoidal en Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,
         .phase = DAC_COSINE_PHASE_0,
@@ -214,8 +216,9 @@ void wifi_init_softap() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_AP, WIFI_BW_HT40));
-    ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(ESP_IF_WIFI_AP, WIFI_PHY_RATE_MCS7_SGI));
+    //ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(ESP_IF_WIFI_AP, WIFI_PHY_RATE_MCS7_SGI));
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(20));
 
     ESP_LOGI(TAG, "WiFi AP initialized with SSID:%s", WIFI_SSID);
 }
