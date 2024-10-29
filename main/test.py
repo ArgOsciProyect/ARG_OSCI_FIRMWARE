@@ -15,7 +15,7 @@ PORT = 8080           # Puerto configurado en el código C
 BUFFER_SIZE = 2048 * 2  # Ajustado para datos de 8 bits (1 byte por muestra)
 
 # Número máximo de muestras a graficar
-MAX_SAMPLES = 500
+MAX_SAMPLES = 50000
 
 # Período entre muestras en segundos (0.5 microsegundos)
 PERIOD = 0.5e-6
@@ -65,7 +65,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
                 # Desempaquetar los datos recibidos
                 data_bytes = bytes(data_list)  # Convertir deque a bytes
-                int_data = np.frombuffer(data_bytes, dtype=np.uint16)
+                int_data = np.frombuffer(data_bytes, dtype=np.uint8)
 
                 # Graficar los datos recibidos con interpolación
                 y = np.array(int_data)
