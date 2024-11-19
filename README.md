@@ -1,41 +1,44 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- |
+# Proyecto de Osciloscopio con ESP32
 
-# ESP-IDF BLE Compatibility Test Example
+Este proyecto consiste en el desarrollo de un osciloscopio utilizando un ESP32. En esta fase, se implementará la parte de comunicación BLE que se utilizará solo para la configuración inicial.
 
-This example is to test the Bluetooth compatibility and mobile phones.
+## Flujo de Trabajo del Firmware
 
-## How to Use Example
+1. **Conexión BLE Inicial**:
+    - El ESP32 se conecta al dispositivo externo mediante BLE.
+    - Se intercambia un mensaje de reconocimiento (simil ACK) para confirmar la conexión.
 
-Before project configuration and build, be sure to set the correct chip target using:
+2. **Intercambio de Claves**:
+    - El ESP32 envía una clave pública al dispositivo externo para encriptar la clave AES.
+    - El dispositivo externo envía la clave AES cifrada con la clave pública.
+    - El ESP32 descifra la clave AES y a partir de ahora toda la información se cifra con AES.
 
-```bash
-idf.py set-target <chip_name>
-```
+3. **Configuración de Red**:
+    - El dispositivo externo decide si el ESP32 actuará como punto de acceso (AP) o se conectará a un AP existente.
+    - La decisión se comunica al ESP32 mediante un mensaje JSON con los campos de interés.
 
-### Test Scenario
+4. **Conexión a un AP Existente**:
+    - Si se decide usar un AP existente, el ESP32 escanea y comunica las redes WiFi detectadas al dispositivo externo.
+    - El dispositivo externo devuelve el SSID y la contraseña de la red a la que el ESP32 debe conectarse.
+    - El ESP32 se conecta a la red con las credenciales proporcionadas y actualiza el campo `APCONN` a `true`.
 
-* ESP32 Module:	ESP32-WROOM-32x
-* IDF version: 7c29a39d6f9f2dfbefc49d34d34e9267afc7200d
-* [Test case](https://github.com/espressif/esp-idf/blob/master/examples/bluetooth/bluedroid/ble/ble_compatibility_test/ble_compatibility_test_case.md)
-* Test APK: LightBlue V1.1.3
-* [Test report](https://github.com/espressif/esp-idf/blob/master/examples/bluetooth/bluedroid/ble/ble_compatibility_test/esp_ble_compatibility_test_report.md)
+5. **Configuración como AP**:
+    - Si se decide usar el ESP32 como AP, este genera aleatoriamente el SSID y la contraseña y los comunica al dispositivo externo.
+    - El dispositivo externo se conecta al AP del ESP32 y actualiza el campo `APCONN` a `true`.
 
-### Hardware Required
+6. **Levantamiento de Sockets**:
+    - Una vez en la misma red, el ESP32 levanta dos sockets para comunicaciones no relacionadas.
+    - El ESP32 envía la información necesaria para conectarse a estos dos sockets al dispositivo externo.
 
-* A development board with ESP32/ESP32-C3/ESP32-C2/ESP32-H2/ESP32-S3 SoC (e.g., ESP32-DevKitC, ESP-WROVER-KIT, etc.)
-* A USB cable for Power supply and programming
+## Ejemplo de JSON de Configuración
 
-See [Development Boards](https://www.espressif.com/en/products/devkits) for more information about it.
-
-### Build and Flash
-
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the [Getting Started Guide](https://idf.espressif.com/) for full steps to configure and use ESP-IDF to build projects.
-
-## Troubleshooting
-
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+```json
+{
+    "use_esp_ap": null,
+    "available_networks": [],
+    "selected_ssid": "",
+    "password": "",
+    "ap_conn": false,
+    "socket1_port": 12345,
+    "socket2_port": 12346
+}
