@@ -3,7 +3,9 @@
   "files.associations": {
     "iperf.h": "c",
     "esp_netif.h": "c",
-    "semphr.h": "c"
+    "semphr.h": "c",
+    "entropy.h": "c",
+    "rsa.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
