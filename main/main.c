@@ -56,19 +56,48 @@ void scan_wifi_and_send(int sock) {
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_networks, ap_records));
 
     char buffer[1024];
-    int len = snprintf(buffer, sizeof(buffer), "Detected %d Wi-Fi networks:\n", num_networks);
+    int len = 0;
     for (int i = 0; i < num_networks; i++) {
         len += snprintf(buffer + len, sizeof(buffer) - len,
-                        "SSID: %s, RSSI: %d dBm\n",
-                        ap_records[i].ssid,
-                        ap_records[i].rssi);
+                        "SSID:%s,\n",
+                        ap_records[i].ssid);
         if (len >= sizeof(buffer)) {
             break;
         }
     }
-
     send(sock, buffer, strlen(buffer), 0);
     free(ap_records);
+}
+
+
+bool parse_ssid_password(const char *input, char *ssid, char *password) {
+    const char *ssid_start = strstr(input, "SSID: ");
+    const char *password_start = strstr(input, "Password: ");
+
+    if (!ssid_start || !password_start) {
+        return false;
+    }
+
+    ssid_start += strlen("SSID: ");
+    password_start += strlen("Password: ");
+
+    const char *ssid_end = strchr(ssid_start, ',');
+    if (!ssid_end) {
+        return false;
+    }
+
+    size_t ssid_len = ssid_end - ssid_start;
+    if (ssid_len >= 32) {
+        return false;
+    }
+
+    strncpy(ssid, ssid_start, ssid_len);
+    ssid[ssid_len] = '\0';
+
+    strncpy(password, password_start, 63);
+    password[63] = '\0';
+
+    return true;
 }
 
 void tcp_server_task(void *pvParameters) {
@@ -107,7 +136,8 @@ void tcp_server_task(void *pvParameters) {
             continue;
         }
 
-        char recv_buf[64];
+        char recv_buf[128];
+        memset(recv_buf, 0, sizeof(recv_buf));
         int len = recv(client_sock, recv_buf, sizeof(recv_buf) - 1, 0);
         if (len < 0) {
             ESP_LOGE(TAG, "Error during recv: errno %d", errno);
@@ -115,22 +145,29 @@ void tcp_server_task(void *pvParameters) {
             continue;
         }
 
-        recv_buf[len] = "\0"; // Null-terminate the received string
+        recv_buf[len] = '\0'; // Null-terminate the received string
+        ESP_LOGI(TAG, "Len %d", len);
         ESP_LOGI(TAG, "Received %s", recv_buf);
-        if (strcmp(recv_buf, "Ext AP") == 0) {
+        if (strcmp(recv_buf, "Ext_AP") == 0) {
             scan_wifi_and_send(client_sock);
 
             while (1) {
+                memset(recv_buf, 0, sizeof(recv_buf));
                 len = recv(client_sock, recv_buf, sizeof(recv_buf) - 1, 0);
                 if (len < 0) {
                     ESP_LOGE(TAG, "Error during recv: errno %d", errno);
                     break;
                 }
 
-                recv_buf[len] = 0; // Null-terminate the received string
+                recv_buf[len] = '\0'; // Null-terminate the received string
+                ESP_LOGI(TAG, "Received after mode: %s", recv_buf);
                 char ssid[32], password[64];
-                if (sscanf(recv_buf, "SSID: %31s Password: %63s", ssid, password) == 2) {
+                memset(ssid, 0, sizeof(ssid));
+                memset(password, 0, sizeof(password));
+
+                if (parse_ssid_password(recv_buf, ssid, password)) {
                     // Attempt to connect to the Wi-Fi network
+                    ESP_LOGI(TAG, "Connecting to %s...", ssid);
                     wifi_config_t wifi_config = {
                         .sta = {
                             .ssid = "",
@@ -177,11 +214,10 @@ void tcp_server_task(void *pvParameters) {
 
                     close(new_sock);
                     break;
+                } else {
+                    ESP_LOGE(TAG, "Invalid SSID or Password format");
                 }
             }
-        }
-        else{
-            ESP_LOGE(TAG, "Invalid command received: %s", recv_buf);
         }
 
         close(client_sock);
