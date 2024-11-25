@@ -6,6 +6,8 @@
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <lwip/sockets.h>
+#include <esp_http_server.h>
+#include <cJSON.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -41,7 +43,10 @@ void wifi_init() {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void scan_wifi_and_send(int sock) {
+
+
+esp_err_t scan_wifi_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Scanning Wi-Fi networks");
     wifi_scan_config_t scan_config = {
         .ssid = NULL,
         .bssid = NULL,
@@ -49,186 +54,180 @@ void scan_wifi_and_send(int sock) {
         .show_hidden = true
     };
     ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
-
     uint16_t num_networks = 0;
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&num_networks));
     wifi_ap_record_t *ap_records = malloc(sizeof(wifi_ap_record_t) * num_networks);
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_networks, ap_records));
-
-    char buffer[1024];
-    int len = 0;
+    cJSON *root = cJSON_CreateArray();
     for (int i = 0; i < num_networks; i++) {
-        len += snprintf(buffer + len, sizeof(buffer) - len,
-                        "SSID:%s,\n",
-                        ap_records[i].ssid);
-        if (len >= sizeof(buffer)) {
-            break;
-        }
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "SSID", (char *)ap_records[i].ssid);
+        cJSON_AddItemToArray(root, item);
     }
-    send(sock, buffer, strlen(buffer), 0);
+    const char *json_response = cJSON_Print(root);
+    httpd_resp_send(req, json_response, strlen(json_response));
     free(ap_records);
+    cJSON_Delete(root);
+    free((void *)json_response);
+    return ESP_OK;
 }
 
-
-bool parse_ssid_password(const char *input, char *ssid, char *password) {
-    const char *ssid_start = strstr(input, "SSID: ");
-    const char *password_start = strstr(input, "Password: ");
-
-    if (!ssid_start || !password_start) {
-        return false;
+esp_err_t connect_wifi_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Connecting to Wi-Fi network");
+    char content[100];
+    int ret = httpd_req_recv(req, content, sizeof(content));
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
     }
-
-    ssid_start += strlen("SSID: ");
-    password_start += strlen("Password: ");
-
-    const char *ssid_end = strchr(ssid_start, ',');
-    if (!ssid_end) {
-        return false;
+    cJSON *root = cJSON_Parse(content);
+    if (root == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
     }
-
-    size_t ssid_len = ssid_end - ssid_start;
-    if (ssid_len >= 32) {
-        return false;
+    cJSON *ssid = cJSON_GetObjectItem(root, "SSID");
+    cJSON *password = cJSON_GetObjectItem(root, "Password");
+    if (!cJSON_IsString(ssid) || !cJSON_IsString(password)) {
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
     }
-
-    strncpy(ssid, ssid_start, ssid_len);
-    ssid[ssid_len] = '\0';
-
-    strncpy(password, password_start, 63);
-    password[63] = '\0';
-
-    return true;
-}
-
-void tcp_server_task(void *pvParameters) {
-    wifi_init(); // Inicializar Wi-Fi
-
-    struct sockaddr_in server_addr = {
-        .sin_family = AF_INET,
-        .sin_addr.s_addr = inet_addr("192.168.4.1"), // IP fija del AP
-        .sin_port = htons(PORT)
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = "",
+            .password = ""
+        },
     };
+    strncpy((char *)wifi_config.sta.ssid, ssid->valuestring, sizeof(wifi_config.sta.ssid));
+    strncpy((char *)wifi_config.sta.password, password->valuestring, sizeof(wifi_config.sta.password));
+    //ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+    //ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_connect());
+    cJSON_Delete(root);
 
-    int listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-    if (listen_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-        vTaskDelete(NULL);
+    // Create a new socket in the new network
+    int new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    struct sockaddr_in new_addr;
+    new_addr.sin_family = AF_INET;
+    new_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    new_addr.sin_port = htons(0); // Let the system choose the port
+    if (bind(new_sock, (struct sockaddr *)&new_addr, sizeof(new_addr)) != 0) {
+        ESP_LOGE(TAG, "New socket unable to bind: errno %d", errno);
+        close(new_sock);
+        return ESP_FAIL;
     }
-
-    if (bind(listen_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) != 0) {
-        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
-        close(listen_sock);
-        vTaskDelete(NULL);
+    socklen_t new_addr_len = sizeof(new_addr);
+    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
+        ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
+        close(new_sock);
+        return ESP_FAIL;
     }
+    char ip_str[16];
+    inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
+    int new_port = ntohs(new_addr.sin_port);
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "IP", ip_str);
+    cJSON_AddNumberToObject(response, "Port", new_port);
+    const char *json_response = cJSON_Print(response);
+    httpd_resp_send(req, json_response, strlen(json_response));
+    cJSON_Delete(response);
+    free((void *)json_response);
+    return ESP_OK;
+}
 
-    if (listen(listen_sock, 1) != 0) {
-        ESP_LOGE(TAG, "Error during listen: errno %d", errno);
-        close(listen_sock);
-        vTaskDelete(NULL);
-    }
-
-    while (1) {
-        struct sockaddr_in client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
-        int client_sock = accept(listen_sock, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_sock < 0) {
-            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
-            continue;
+esp_err_t select_mode_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Selecting Wi-Fi mode");
+    char content[100];
+    int ret = httpd_req_recv(req, content, sizeof(content));
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
         }
-
-        char recv_buf[128];
-        memset(recv_buf, 0, sizeof(recv_buf));
-        int len = recv(client_sock, recv_buf, sizeof(recv_buf) - 1, 0);
-        if (len < 0) {
-            ESP_LOGE(TAG, "Error during recv: errno %d", errno);
-            close(client_sock);
-            continue;
+        return ESP_FAIL;
+    }
+    cJSON *root = cJSON_Parse(content);
+    if (root == NULL) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON *mode = cJSON_GetObjectItem(root, "mode");
+    if (!cJSON_IsString(mode)) {
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+    if (strcmp(mode->valuestring, "External AP") == 0) {
+        scan_wifi_handler(req);
+    } else if (strcmp(mode->valuestring, "Internal AP") == 0) {
+        // Create a new socket in the current network
+        int new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+        struct sockaddr_in new_addr;
+        new_addr.sin_family = AF_INET;
+        new_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        new_addr.sin_port = htons(0); // Let the system choose the port
+        if (bind(new_sock, (struct sockaddr *)&new_addr, sizeof(new_addr)) != 0) {
+            ESP_LOGE(TAG, "New socket unable to bind: errno %d", errno);
+            close(new_sock);
+            return ESP_FAIL;
         }
-
-        recv_buf[len] = '\0'; // Null-terminate the received string
-        ESP_LOGI(TAG, "Len %d", len);
-        ESP_LOGI(TAG, "Received %s", recv_buf);
-        if (strcmp(recv_buf, "Ext_AP") == 0) {
-            scan_wifi_and_send(client_sock);
-
-            while (1) {
-                memset(recv_buf, 0, sizeof(recv_buf));
-                len = recv(client_sock, recv_buf, sizeof(recv_buf) - 1, 0);
-                if (len < 0) {
-                    ESP_LOGE(TAG, "Error during recv: errno %d", errno);
-                    break;
-                }
-
-                recv_buf[len] = '\0'; // Null-terminate the received string
-                ESP_LOGI(TAG, "Received after mode: %s", recv_buf);
-                char ssid[32], password[64];
-                memset(ssid, 0, sizeof(ssid));
-                memset(password, 0, sizeof(password));
-
-                if (parse_ssid_password(recv_buf, ssid, password)) {
-                    // Attempt to connect to the Wi-Fi network
-                    ESP_LOGI(TAG, "Connecting to %s...", ssid);
-                    wifi_config_t wifi_config = {
-                        .sta = {
-                            .ssid = "",
-                            .password = ""
-                        },
-                    };
-                    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-                    strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-
-                    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-                    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-                    ESP_ERROR_CHECK(esp_wifi_start());
-                    ESP_ERROR_CHECK(esp_wifi_connect());
-
-                    // Create a new socket in the new network
-                    int new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-                    struct sockaddr_in new_addr;
-                    new_addr.sin_family = AF_INET;
-                    new_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-                    new_addr.sin_port = htons(0); // Let the system choose the port
-
-                    if (bind(new_sock, (struct sockaddr *)&new_addr, sizeof(new_addr)) != 0) {
-                        ESP_LOGE(TAG, "New socket unable to bind: errno %d", errno);
-                        close(new_sock);
-                        break;
-                    }
-
-                    socklen_t new_addr_len = sizeof(new_addr);
-                    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
-                        ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
-                        close(new_sock);
-                        break;
-                    }
-
-                    char ip_str[16];
-                    inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
-                    int new_port = ntohs(new_addr.sin_port);
-
-                    send(client_sock, ip_str, strlen(ip_str), 0);
-                    send(client_sock, &new_port, sizeof(new_port), 0);
-
-                    // Disable AP mode
-                    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-
-                    close(new_sock);
-                    break;
-                } else {
-                    ESP_LOGE(TAG, "Invalid SSID or Password format");
-                }
-            }
+        socklen_t new_addr_len = sizeof(new_addr);
+        if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
+            ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
+            close(new_sock);
+            return ESP_FAIL;
         }
+        char ip_str[16];
+        inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
+        int new_port = ntohs(new_addr.sin_port);
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "IP", ip_str);
+        cJSON_AddNumberToObject(response, "Port", new_port);
+        const char *json_response = cJSON_Print(response);
+        httpd_resp_send(req, json_response, strlen(json_response));
+        cJSON_Delete(response);
+        free((void *)json_response);
+    }
+    cJSON_Delete(root);
+    return ESP_OK;
+}
 
-        close(client_sock);
+httpd_handle_t start_webserver(void) {
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.core_id = 0; // Run on core 0
+    httpd_handle_t server = NULL;
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_uri_t scan_wifi_uri = {
+            .uri = "/scan_wifi",
+            .method = HTTP_GET,
+            .handler = scan_wifi_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &scan_wifi_uri);
+
+        httpd_uri_t connect_wifi_uri = {
+            .uri = "/connect_wifi",
+            .method = HTTP_POST,
+            .handler = connect_wifi_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &connect_wifi_uri);
+
+        httpd_uri_t select_mode_uri = {
+            .uri = "/select_mode",
+            .method = HTTP_POST,
+            .handler = select_mode_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &select_mode_uri);
     }
 
-    close(listen_sock);
-    vTaskDelete(NULL);
+    return server;
 }
 
 void app_main(void) {
-
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -239,5 +238,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    xTaskCreate(tcp_server_task, "tcp_server", 4096*2, NULL, 5, NULL);
+    wifi_init(); // Inicializar Wi-Fi
+
+    start_webserver(); // Iniciar servidor web
 }
