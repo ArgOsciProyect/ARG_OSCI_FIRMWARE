@@ -6,7 +6,8 @@
     "semphr.h": "c",
     "entropy.h": "c",
     "rsa.h": "c",
-    "functional": "cpp"
+    "functional": "cpp",
+    "esp_log.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",

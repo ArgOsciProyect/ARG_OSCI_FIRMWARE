@@ -9,6 +9,8 @@
 #include <esp_http_server.h>
 #include <cJSON.h>
 #include <esp_netif.h> // Incluir la biblioteca correcta
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -16,6 +18,9 @@
 #define PORT 8080
 
 static const char *TAG = "ESP32_AP";
+static int new_sock = -1;
+static httpd_handle_t second_server = NULL;
+static TaskHandle_t socket_task_handle = NULL;
 
 void wifi_init() {
     esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
@@ -50,6 +55,33 @@ void wifi_init() {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
+void socket_task(void *pvParameters) {
+    while (1) {
+        if (new_sock == -1) {
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            continue;
+        }
+
+        struct sockaddr_in client_addr;
+        socklen_t client_addr_len = sizeof(client_addr);
+        int client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_sock < 0) {
+            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
+            close(new_sock);
+            new_sock = -1;
+            continue;
+        }
+
+        char rx_buffer[128];
+        while (1) {
+            int len = send(client_sock, "Hello, world!", 13, 0);
+            vTaskDelay(1000 / portTICK_PERIOD_MS);            
+        }
+
+        close(client_sock);
+    }
+}
+
 esp_err_t scan_wifi_handler(httpd_req_t *req) {
     wifi_scan_config_t scan_config = {
         .ssid = NULL,
@@ -64,9 +96,22 @@ esp_err_t scan_wifi_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_networks, ap_records));
     cJSON *root = cJSON_CreateArray();
     for (int i = 0; i < num_networks; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "SSID", (char *)ap_records[i].ssid);
-        cJSON_AddItemToArray(root, item);
+        // Verificar si el SSID ya existe en el JSON
+        bool ssid_exists = false;
+        cJSON *item;
+        cJSON_ArrayForEach(item, root) {
+            cJSON *ssid = cJSON_GetObjectItem(item, "SSID");
+            if (ssid && strcmp(ssid->valuestring, (char *)ap_records[i].ssid) == 0) {
+                ssid_exists = true;
+                break;
+            }
+        }
+        // Agregar el SSID solo si no existe
+        if (!ssid_exists && strlen((char *)ap_records[i].ssid) > 0) {
+            item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "SSID", (char *)ap_records[i].ssid);
+            cJSON_AddItemToArray(root, item);
+        }
     }
     const char *json_response = cJSON_Print(root);
     httpd_resp_send(req, json_response, strlen(json_response));
@@ -77,6 +122,7 @@ esp_err_t scan_wifi_handler(httpd_req_t *req) {
 }
 
 esp_err_t test_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Test handler called");
     cJSON *root = cJSON_CreateArray();
     cJSON *item = cJSON_CreateObject();
     cJSON_AddStringToObject(item, "Test", "John Doe");
@@ -89,26 +135,32 @@ esp_err_t test_handler(httpd_req_t *req) {
 }
 
 httpd_handle_t start_second_webserver(void) {
+    // Detener el servidor existente si ya está en ejecución
+    if (second_server != NULL) {
+        httpd_stop(second_server);
+        second_server = NULL;
+    }
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
-    httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) == ESP_OK) {
+    if (httpd_start(&second_server, &config) == ESP_OK) {
         httpd_uri_t test_uri = {
             .uri = "/test",
             .method = HTTP_GET,
             .handler = test_handler,
             .user_ctx = NULL
         };
-        httpd_register_uri_handler(server, &test_uri);
+        httpd_register_uri_handler(second_server, &test_uri);
     }
 
-    return server;
+    return second_server;
 }
 
 esp_err_t connect_wifi_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Connecting to Wi-Fi network");
-    char content[100];
+    char content[200];
     int ret = httpd_req_recv(req, content, sizeof(content));
+    ESP_LOGI(TAG, "Received content: %s", content);
     if (ret <= 0) {
         if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
             httpd_resp_send_408(req);
@@ -123,7 +175,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     cJSON *ssid = cJSON_GetObjectItem(root, "SSID");
     cJSON *password = cJSON_GetObjectItem(root, "Password");
     if (!cJSON_IsString(ssid) || !cJSON_IsString(password)) {
-        httpd_resp_send_500(req);
+        httpd_resp_send_408(req);
         cJSON_Delete(root);
         return ESP_FAIL;
     }
@@ -160,8 +212,18 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Detener el socket y el segundo servidor web si ya existen
+    if (new_sock != -1) {
+        close(new_sock);
+        new_sock = -1;
+    }
+    if (second_server != NULL) {
+        httpd_stop(second_server);
+        second_server = NULL;
+    }
+
     // Crear un socket en la red local del AP externo
-    int new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (new_sock < 0) {
         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
         httpd_resp_send_500(req);
@@ -171,11 +233,12 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     struct sockaddr_in new_addr;
     new_addr.sin_family = AF_INET;
     new_addr.sin_addr.s_addr = ip_info.ip.addr; // Usar la IP asignada al ESP32 en modo STA
-    new_addr.sin_port = htons(22); // Dejar que el sistema elija el puerto automáticamente
+    new_addr.sin_port = htons(0); // Dejar que el sistema elija el puerto automáticamente
 
     if (bind(new_sock, (struct sockaddr *)&new_addr, sizeof(new_addr)) != 0) {
         ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -183,6 +246,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     if (listen(new_sock, 1) != 0) {
         ESP_LOGE(TAG, "Error during listen: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -192,6 +256,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
         ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -209,7 +274,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     free((void *)json_response);
 
     // Iniciar el segundo servidor web en la red STA
-    start_second_webserver();
+    second_server = start_second_webserver();
 
     return ESP_OK;
 }
@@ -224,7 +289,16 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     }
 
     // Crear un socket en la red local del AP
-    int new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if (new_sock != -1) {
+        close(new_sock);
+        new_sock = -1;
+    }
+    if (socket_task_handle != NULL) {
+        vTaskDelete(socket_task_handle);
+        socket_task_handle = NULL;
+    }
+
+    new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (new_sock < 0) {
         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
         httpd_resp_send_500(req);
@@ -239,6 +313,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     if (bind(new_sock, (struct sockaddr *)&new_addr, sizeof(new_addr)) != 0) {
         ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -246,6 +321,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     if (listen(new_sock, 1) != 0) {
         ESP_LOGE(TAG, "Error during listen: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -255,6 +331,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
         ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
         close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -271,9 +348,11 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     cJSON_Delete(response);
     free((void *)json_response);
 
+    // Crear la tarea para manejar el socket en el núcleo 1
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, (void *)new_sock, 5, &socket_task_handle, 1);
+
     return ESP_OK;
 }
-
 
 httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -322,6 +401,9 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     wifi_init(); // Inicializar Wi-Fi
+
+    // Crear la tarea para manejar el socket en el núcleo 1
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, NULL, 5, &socket_task_handle, 1);
 
     start_webserver(); // Iniciar servidor web
 }
