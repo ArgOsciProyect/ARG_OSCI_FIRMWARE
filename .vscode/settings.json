@@ -5,7 +5,8 @@
     "esp_netif.h": "c",
     "semphr.h": "c",
     "entropy.h": "c",
-    "rsa.h": "c"
+    "rsa.h": "c",
+    "functional": "cpp"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
