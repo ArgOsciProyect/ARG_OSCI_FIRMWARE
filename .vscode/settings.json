@@ -7,7 +7,8 @@
     "entropy.h": "c",
     "rsa.h": "c",
     "functional": "cpp",
-    "esp_log.h": "c"
+    "esp_log.h": "c",
+    "cjson.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
