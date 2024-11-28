@@ -71,10 +71,22 @@ void socket_task(void *pvParameters) {
             new_sock = -1;
             continue;
         }
+        else{
+            ESP_LOGI(TAG, "Client connected, IP: %s, Port: %d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        }
 
         char rx_buffer[128];
         while (1) {
-            int len = send(client_sock, "Hello, world!", 13, 0);
+            int len = send(client_sock, "Hello, world!", 14, 0);
+            if (len < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                break;
+            }
+            else if (len == 0) {
+                ESP_LOGW(TAG, "Connection closed");
+                break;
+            }
+            ESP_LOGI(TAG, "Sent %d bytes", len);
             vTaskDelay(1000 / portTICK_PERIOD_MS);            
         }
 
@@ -293,10 +305,6 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
         close(new_sock);
         new_sock = -1;
     }
-    if (socket_task_handle != NULL) {
-        vTaskDelete(socket_task_handle);
-        socket_task_handle = NULL;
-    }
 
     new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (new_sock < 0) {
@@ -347,9 +355,6 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     httpd_resp_send(req, json_response, strlen(json_response));
     cJSON_Delete(response);
     free((void *)json_response);
-
-    // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, (void *)new_sock, 5, &socket_task_handle, 1);
 
     return ESP_OK;
 }
@@ -402,8 +407,8 @@ void app_main(void) {
 
     wifi_init(); // Inicializar Wi-Fi
 
+    start_webserver(); // Iniciar servidor web
+
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, NULL, 5, &socket_task_handle, 1);
-
-    start_webserver(); // Iniciar servidor web
 }
