@@ -1,26 +1,13 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <esp_wifi.h>
-#include <esp_event.h>
-#include <esp_log.h>
-#include <nvs_flash.h>
-#include <lwip/sockets.h>
-#include <esp_http_server.h>
-#include <cJSON.h>
-#include <esp_netif.h> // Incluir la biblioteca correcta
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
+#include "include.h"
 
-#define WIFI_SSID "ESP32_AP"
-#define WIFI_PASSWORD "password123"
-#define MAX_STA_CONN 4
-#define PORT 8080
 
 static const char *TAG = "ESP32_AP";
 static int new_sock = -1;
 static httpd_handle_t second_server = NULL;
 static TaskHandle_t socket_task_handle = NULL;
+static unsigned char public_key[KEYSIZE];
+static unsigned char private_key[KEYSIZE];
+static SemaphoreHandle_t key_gen_semaphore;
 
 void wifi_init() {
     esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
@@ -54,6 +41,68 @@ void wifi_init() {
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 }
+
+static void generate_key_pair_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Generating RSA key pair...");
+    int ret;
+    mbedtls_pk_context pk;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    const char *pers = "gen_key_pair";
+
+    mbedtls_pk_init(&pk);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers))) != 0) {
+        goto exit;
+    }
+    else {
+        ESP_LOGI(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
+    }
+
+    if ((ret = mbedtls_pk_setup(&pk, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA))) != 0) {
+        goto exit;
+    }
+    else {
+        ESP_LOGI(TAG, "mbedtls_pk_setup returned %d", ret);
+    }
+
+    if ((ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), mbedtls_ctr_drbg_random, &ctr_drbg, KEYSIZE, 65537)) != 0) {
+        ESP_LOGI(TAG, "mbedtls_rsa_gen_key returned %d", ret);
+        goto exit;
+    }
+    else {
+        ESP_LOGI(TAG, "mbedtls_rsa_gen_key returned %d", ret);
+    }
+
+    memset(public_key, 0, sizeof(public_key));
+    if ((ret = mbedtls_pk_write_pubkey_pem(&pk, public_key, sizeof(public_key))) != 0) {
+        goto exit;
+    }
+
+    memset(private_key, 0, sizeof(private_key));
+    if ((ret = mbedtls_pk_write_key_pem(&pk, private_key, sizeof(private_key))) != 0) {
+        goto exit;
+    }
+    else {
+        ESP_LOGI(TAG, "Private Key:\n%s", (char*)private_key);
+    }
+
+    ESP_LOGI(TAG, "Public Key:\n%s", (char*)public_key);
+
+exit:
+    mbedtls_pk_free(&pk);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+
+    // Dar el semáforo para indicar que la clave ha sido generada
+    xSemaphoreGive(key_gen_semaphore);
+
+    // Eliminar la tarea
+    vTaskDelete(NULL);
+}
+
 
 void socket_task(void *pvParameters) {
     while (1) {
@@ -92,6 +141,41 @@ void socket_task(void *pvParameters) {
 
         close(client_sock);
     }
+}
+
+int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len) {
+    int ret;
+    mbedtls_pk_context pk;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    const char *pers = "decrypt";
+
+    mbedtls_pk_init(&pk);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers))) != 0) {
+        ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
+        goto exit;
+    }
+
+    if ((ret = mbedtls_pk_parse_key(&pk, private_key, strlen((char *)private_key) + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+        ESP_LOGE(TAG, "mbedtls_pk_parse_key returned %d", ret);
+        goto exit;
+    }
+
+    size_t max_output_len = *output_len;  // Assume *output_len is the buffer size
+    if ((ret = mbedtls_pk_decrypt(&pk, input, input_len, output, output_len, max_output_len, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+        ESP_LOGE(TAG, "mbedtls_pk_decrypt returned %d", ret);
+        ESP_LOGE(TAG, "output_len: %d", *output_len);
+        goto exit;
+    }
+
+exit:
+    mbedtls_pk_free(&pk);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    return ret;
 }
 
 static void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record) {
@@ -174,9 +258,8 @@ httpd_handle_t start_second_webserver(void) {
 
     return second_server;
 }
-
 static esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config) {
-    char content[200];
+    char content[KEYSIZE]; // Aumentar el tamaño del buffer para acomodar datos encriptados
     int ret = httpd_req_recv(req, content, sizeof(content));
     ESP_LOGI(TAG, "Received content: %s", content);
     if (ret <= 0) {
@@ -190,15 +273,58 @@ static esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_co
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    cJSON *ssid = cJSON_GetObjectItem(root, "SSID");
-    cJSON *password = cJSON_GetObjectItem(root, "Password");
-    if (!cJSON_IsString(ssid) || !cJSON_IsString(password)) {
+    cJSON *ssid_encrypted = cJSON_GetObjectItem(root, "SSID");
+    cJSON *password_encrypted = cJSON_GetObjectItem(root, "Password");
+    if (!cJSON_IsString(ssid_encrypted) || !cJSON_IsString(password_encrypted)) {
         httpd_resp_send_408(req);
         cJSON_Delete(root);
         return ESP_FAIL;
     }
-    strncpy((char *)wifi_config->sta.ssid, ssid->valuestring, sizeof(wifi_config->sta.ssid));
-    strncpy((char *)wifi_config->sta.password, password->valuestring, sizeof(wifi_config->sta.password));
+    ESP_LOGI(TAG, "SSID: %s", ssid_encrypted->valuestring);
+    ESP_LOGI(TAG, "Password: %s", password_encrypted->valuestring);
+
+    // Decodificar SSID en base64
+    unsigned char ssid_decoded[512];
+    size_t ssid_decoded_len;
+    if ((ret = mbedtls_base64_decode(ssid_decoded, sizeof(ssid_decoded), &ssid_decoded_len, (unsigned char *)ssid_encrypted->valuestring, strlen(ssid_encrypted->valuestring))) != 0) {
+        ESP_LOGE(TAG, "mbedtls_base64_decode returned %d", ret);
+        ESP_LOGE(TAG, "ssid_decoded_len: %d", ssid_decoded_len);
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    // Decodificar Password en base64
+    unsigned char password_decoded[512];
+    size_t password_decoded_len;
+    if ((ret = mbedtls_base64_decode(password_decoded, sizeof(password_decoded), &password_decoded_len, (unsigned char *)password_encrypted->valuestring, strlen(password_encrypted->valuestring))) != 0) {
+        ESP_LOGE(TAG, "mbedtls_base64_decode returned %d", ret);
+        ESP_LOGE(TAG, "password_decoded_len: %d", password_decoded_len);
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    // Desencriptar SSID
+    unsigned char ssid_decrypted[512];
+    size_t ssid_decrypted_len = sizeof(ssid_decrypted);
+    if (decrypt_with_private_key(ssid_decoded, ssid_decoded_len, ssid_decrypted, &ssid_decrypted_len) != 0) {
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    // Desencriptar Password
+    unsigned char password_decrypted[512];
+    size_t password_decrypted_len = sizeof(password_decrypted);
+    if (decrypt_with_private_key(password_decoded, password_decoded_len, password_decrypted, &password_decrypted_len) != 0) {
+        httpd_resp_send_500(req);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    strncpy((char *)wifi_config->sta.ssid, (char *)ssid_decrypted, sizeof(wifi_config->sta.ssid));
+    strncpy((char *)wifi_config->sta.password, (char *)password_decrypted, sizeof(wifi_config->sta.password));
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -402,13 +528,45 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     return send_internal_mode_response(req, ip_str, new_port);
 }
 
+esp_err_t get_public_key_handler(httpd_req_t *req) {
+    cJSON *response = cJSON_CreateObject();
+    if (response == NULL) {
+        return httpd_resp_send_500(req);
+    }
+
+    cJSON_AddStringToObject(response, "PublicKey", (char *)public_key);
+
+    const char *json_response = cJSON_Print(response);
+    if (json_response == NULL) {
+        cJSON_Delete(response);
+        return httpd_resp_send_500(req);
+    }
+
+    esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
+
+    cJSON_Delete(response);
+    free((void *)json_response);
+
+    return ret;
+}
+
 httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 81;
     config.ctrl_port = 32767;
+    config.stack_size = 4096*2.5;
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK) {
+
+        httpd_uri_t get_public_key_uri = {
+            .uri = "/get_public_key",
+            .method = HTTP_GET,
+            .handler = get_public_key_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &get_public_key_uri);
+
         httpd_uri_t scan_wifi_uri = {
             .uri = "/scan_wifi",
             .method = HTTP_GET,
@@ -448,9 +606,36 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    wifi_init(); // Inicializar Wi-Fi
+    // Crear el semáforo
+    key_gen_semaphore = xSemaphoreCreateBinary();
+    if (key_gen_semaphore == NULL) {
+        ESP_LOGE(TAG, "Failed to create semaphore");
+        return;
+    }
 
-    start_webserver(); // Iniciar servidor web
+    esp_task_wdt_deinit();
+    // Crear la tarea para generar la clave
+    xTaskCreate(generate_key_pair_task, "generate_key_pair_task", 8192, NULL, 5, NULL);
+
+    // Esperar a que se genere la clave
+    if (xSemaphoreTake(key_gen_semaphore, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take semaphore");
+        return;
+    }
+
+    esp_task_wdt_config_t twdt_config = {
+        .timeout_ms = 1000000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Bitmask of all cores
+        .trigger_panic = false,
+    };
+
+    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+
+    // Inicializar Wi-Fi
+    wifi_init();
+
+    // Iniciar servidor web
+    start_webserver();
 
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, NULL, 5, &socket_task_handle, 1);

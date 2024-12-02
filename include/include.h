@@ -11,14 +11,22 @@
 #include <lwip/sockets.h>
 #include <esp_http_server.h>
 #include <cJSON.h>
-#include <esp_netif.h>
+#include <esp_netif.h> // Incluir la biblioteca correcta
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/error.h>
+#include <mbedtls/base64.h>
+#include <esp_task_wdt.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
 #define MAX_STA_CONN 4
 #define PORT 8080
+#define KEYSIZE 3072
+#define KEYSIZEBITS 3072*8
 
 /**
  * @brief Initialize Wi-Fi in APSTA mode.
@@ -46,7 +54,7 @@ esp_err_t scan_wifi_handler(httpd_req_t *req);
  * @param root JSON array.
  * @param ap_record Access point record.
  */
-void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record);
+static void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record);
 
 /**
  * @brief Scan and get access point records.
@@ -54,7 +62,7 @@ void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record);
  * @param num_networks Pointer to store the number of networks found.
  * @return cJSON* JSON array of access point records.
  */
-cJSON* scan_and_get_ap_records(uint16_t *num_networks);
+static cJSON* scan_and_get_ap_records(uint16_t *num_networks);
 
 /**
  * @brief HTTP handler for test endpoint.
@@ -78,7 +86,7 @@ httpd_handle_t start_second_webserver(void);
  * @param wifi_config Wi-Fi configuration to be filled.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config);
+static esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config);
 
 /**
  * @brief Wait for IP address to be assigned.
@@ -86,7 +94,7 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config);
  * @param ip_info IP information to be filled.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t wait_for_ip(esp_netif_ip_info_t *ip_info);
+static esp_err_t wait_for_ip(esp_netif_ip_info_t *ip_info);
 
 /**
  * @brief Create and bind a socket.
@@ -94,7 +102,7 @@ esp_err_t wait_for_ip(esp_netif_ip_info_t *ip_info);
  * @param ip_info IP information for binding.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t create_socket_and_bind(esp_netif_ip_info_t *ip_info);
+static esp_err_t create_socket_and_bind(esp_netif_ip_info_t *ip_info);
 
 /**
  * @brief HTTP handler to connect to a Wi-Fi network.
@@ -110,7 +118,52 @@ esp_err_t connect_wifi_handler(httpd_req_t *req);
  * @param ip_info IP information to be filled.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t get_ap_ip_info(esp_netif_ip_info_t *ip_info);
+static esp_err_t get_ap_ip_info(esp_netif_ip_info_t *ip_info);
+
+
+/**
+ * @brief Decrypts input data using a private key.
+ *
+ * This function uses the mbedtls library to decrypt data that was encrypted
+ * with the corresponding public key. It initializes the necessary mbedtls
+ * contexts, seeds the random number generator, parses the private key, and
+ * performs the decryption.
+ *
+ * @param input Pointer to the encrypted input data.
+ * @param input_len Length of the encrypted input data.
+ * @param output Pointer to the buffer where the decrypted output data will be stored.
+ * @param output_len Pointer to the size of the output buffer. On successful decryption,
+ *                   this will be updated with the actual length of the decrypted data.
+ *
+ * @return 0 on success, or a non-zero error code on failure.
+ */
+int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len) ;
+
+/**
+ * @brief Task to generate an RSA key pair.
+ *
+ * This function generates an RSA key pair using the mbedTLS library. It initializes the necessary
+ * contexts, seeds the random number generator, and generates the RSA key pair. The public and private
+ * keys are then written to PEM format and stored in the respective buffers. The watchdog timer is
+ * disabled during the key generation process and re-enabled afterwards.
+ *
+ * @param pvParameters Pointer to the parameters passed to the task (not used).
+ *
+ * The function performs the following steps:
+ * - Disables the watchdog timer.
+ * - Initializes the mbedTLS contexts for PK, entropy, and CTR-DRBG.
+ * - Seeds the CTR-DRBG context.
+ * - Sets up the PK context for RSA.
+ * - Generates the RSA key pair.
+ * - Writes the public key to the public_key buffer in PEM format.
+ * - Writes the private key to the private_key buffer in PEM format.
+ * - Logs the generated keys.
+ * - Frees the mbedTLS contexts.
+ * - Re-enables the watchdog timer.
+ * - Gives the semaphore to indicate that the key has been generated.
+ * - Deletes the task.
+ */
+static void generate_key_pair_task(void *pvParameters);
 
 /**
  * @brief Create and bind a socket for internal mode.
@@ -118,7 +171,17 @@ esp_err_t get_ap_ip_info(esp_netif_ip_info_t *ip_info);
  * @param ip_info IP information for binding.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info);
+static esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info);
+
+/**
+ * @brief Handler function to send the public key in response to an HTTP request.
+ *
+ * This function is called when an HTTP request is received for the public key.
+ * It sends the public key as the response.
+ *
+ * @param req Pointer to the HTTP request structure.
+ */
+esp_err_t get_public_key_handler(httpd_req_t *req);
 
 /**
  * @brief Get socket IP and port for internal mode.
@@ -127,7 +190,7 @@ esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info);
  * @param new_port Pointer to store the port number.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t get_socket_ip_and_port(char *ip_str, int *new_port);
+static esp_err_t get_socket_ip_and_port(char *ip_str, int *new_port);
 
 /**
  * @brief Send internal mode response.
@@ -137,7 +200,7 @@ esp_err_t get_socket_ip_and_port(char *ip_str, int *new_port);
  * @param new_port Port number.
  * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
  */
-esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str, int new_port);
+static esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str, int new_port);
 
 /**
  * @brief HTTP handler to switch to internal mode.
