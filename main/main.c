@@ -111,7 +111,7 @@ static uint16_t sine_wave[BUFFER_SIZE / 2];
 
 void generate_sine_wave() {
     for (int i = 0; i < BUFFER_SIZE / 2; i++) {
-        sine_wave[i] = (uint16_t)(2048 + 2047 * sin(2 * 3.14159 * SINE_WAVE_FREQ * i / SAMPLE_RATE));
+        sine_wave[i] = (uint16_t)(2048 + 2047 * sin(2 * 3.141592 * SINE_WAVE_FREQ * i / SAMPLE_RATE));
     }
 }
 
