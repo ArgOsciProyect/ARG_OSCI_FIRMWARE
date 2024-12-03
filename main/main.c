@@ -518,23 +518,9 @@ static esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info) {
     return ESP_OK;
 }
 
-static esp_err_t get_socket_ip_and_port(char *ip_str, int *new_port) {
-    struct sockaddr_in new_addr;
-    socklen_t new_addr_len = sizeof(new_addr);
-    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
-        ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
-        close(new_sock);
-        new_sock = -1;
-        return ESP_FAIL;
-    }
-
-    inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
-    *new_port = ntohs(new_addr.sin_port);
-    return ESP_OK;
-}
-
 static esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str, int new_port) {
     cJSON *response = cJSON_CreateObject();
+    ESP_LOGI(TAG, "IP: %s, Port: %d", ip_str, new_port);
     cJSON_AddStringToObject(response, "IP", ip_str);
     cJSON_AddNumberToObject(response, "Port", new_port);
     const char *json_response = cJSON_Print(response);
@@ -557,12 +543,22 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
     }
 
     char ip_str[16];
+    memset(ip_str, 0, sizeof(ip_str));
     int new_port;
-    if (get_socket_ip_and_port(ip_str, &new_port) != ESP_OK) {
+
+    struct sockaddr_in new_addr;
+    socklen_t new_addr_len = sizeof(new_addr);
+    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
+        ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
+        close(new_sock);
+        new_sock = -1;
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
+    inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
+    new_port = ntohs(new_addr.sin_port);
+    ESP_LOGI(TAG, "IP: %s, Port: %d", ip_str, new_port);
     return send_internal_mode_response(req, ip_str, new_port);
 }
 
@@ -593,7 +589,7 @@ httpd_handle_t start_webserver(void) {
     config.core_id = 0; // Run on core 0
     config.server_port = 81;
     config.ctrl_port = 32767;
-    config.stack_size = 4096*2.5;
+    config.stack_size = 4096*4;
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK) {
 
