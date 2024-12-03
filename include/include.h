@@ -20,6 +20,8 @@
 #include <mbedtls/error.h>
 #include <mbedtls/base64.h>
 #include <esp_task_wdt.h>
+#include <driver/timer.h>
+#include <math.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -27,11 +29,47 @@
 #define PORT 8080
 #define KEYSIZE 3072
 #define KEYSIZEBITS 3072*8
+#define TIMER_DIVIDER 16 //  Hardware timer clock divider
+#define TIMER_BASE_CLK 80000000 // 80 MHz
+#define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER) // Convert counter value to seconds
+#define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 
 /**
  * @brief Initialize Wi-Fi in APSTA mode.
  */
 void wifi_init(void);
+
+/**
+ * @brief Initialize the hardware timer with specific configuration.
+ *
+ * This function sets up the timer with the following configuration:
+ * - Divider: TIMER_DIVIDER
+ * - Counter direction: Up
+ * - Counter enable: Paused initially
+ * - Alarm enable: Enabled
+ * - Auto-reload: Enabled
+ *
+ * The timer is initialized for TIMER_GROUP_0 and TIMER_0. The counter value is set to 0,
+ * and the alarm value is set based on TIMER_INTERVAL_US and TIMER_SCALE. The timer interrupt
+ * is enabled, and the timer is started.
+ */
+void my_timer_init();
+
+/**
+ * @brief Waits for a specified timer interval to elapse.
+ *
+ * This function continuously checks the current value of the timer counter
+ * until it reaches the specified interval. Once the interval has elapsed,
+ * the timer counter is reset to zero.
+ *
+ * @note The timer interval is defined by the macro TIMER_INTERVAL_US and
+ *       the timer scale is defined by the macro TIMER_SCALE.
+ *
+ * @param None
+ *
+ * @return None
+ */
+void timer_wait();
 
 /**
  * @brief Task to handle socket communication.

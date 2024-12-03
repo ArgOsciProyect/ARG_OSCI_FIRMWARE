@@ -104,7 +104,46 @@ exit:
 }
 
 
+#define SAMPLE_RATE 2000000 // 2 MHz
+#define BUFFER_SIZE 8192 // 8192 bytes (4096 samples)
+#define SINE_WAVE_FREQ 1000 // 1 kHz sine wave
+static uint16_t sine_wave[BUFFER_SIZE / 2];
+
+void generate_sine_wave() {
+    for (int i = 0; i < BUFFER_SIZE / 2; i++) {
+        sine_wave[i] = (uint16_t)(2048 + 2047 * sin(2 * 3.14159 * SINE_WAVE_FREQ * i / SAMPLE_RATE));
+    }
+}
+
+void my_timer_init() {
+    timer_config_t config = {
+        .divider = TIMER_DIVIDER,
+        .counter_dir = TIMER_COUNT_UP,
+        .counter_en = TIMER_PAUSE,
+        .alarm_en = TIMER_ALARM_EN,
+        .auto_reload = TIMER_AUTORELOAD_EN,
+    };
+    timer_init(TIMER_GROUP_0, TIMER_0, &config);
+    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
+    timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, TIMER_INTERVAL_US * (TIMER_SCALE / 1000000));
+    timer_enable_intr(TIMER_GROUP_0, TIMER_0);
+    timer_start(TIMER_GROUP_0, TIMER_0);
+}
+
+
+void timer_wait() {
+    uint64_t timer_val;
+    timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
+    while (timer_val < TIMER_INTERVAL_US * (TIMER_SCALE / 1000000)) {
+        timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
+    }
+    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
+}
+
 void socket_task(void *pvParameters) {
+    generate_sine_wave();
+    my_timer_init();
+
     while (1) {
         if (new_sock == -1) {
             vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -119,24 +158,23 @@ void socket_task(void *pvParameters) {
             close(new_sock);
             new_sock = -1;
             continue;
-        }
-        else{
+        } else {
             ESP_LOGI(TAG, "Client connected, IP: %s, Port: %d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         }
 
-        char rx_buffer[128];
         while (1) {
-            int len = send(client_sock, "Hello, world!", 14, 0);
+            int len = send(client_sock, sine_wave, BUFFER_SIZE, 0);
             if (len < 0) {
                 ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
-            }
-            else if (len == 0) {
+            } else if (len == 0) {
                 ESP_LOGW(TAG, "Connection closed");
                 break;
             }
-            ESP_LOGI(TAG, "Sent %d bytes", len);
-            vTaskDelay(1000 / portTICK_PERIOD_MS);            
+            //ESP_LOGI(TAG, "Sent %d bytes", len);
+
+            // Esperar el tiempo exacto usando el temporizador de hardware
+            timer_wait();
         }
 
         close(client_sock);
