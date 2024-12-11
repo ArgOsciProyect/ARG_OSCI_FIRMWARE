@@ -42,6 +42,40 @@ void wifi_init() {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
+void start_adc_sampling() {
+    ESP_LOGI(TAG, "Starting ADC sampling");
+
+    adc_digi_pattern_config_t adc_pattern = {
+        .atten = ADC_ATTEN_DB_12,
+        .channel = ADC_CHANNEL,
+        .bit_width = ADC_BITWIDTH_9
+    };
+
+    adc_continuous_handle_cfg_t adc_config = {
+        .max_store_buf_size = BUF_SIZE * 6,
+        .conv_frame_size = 128,
+    };
+
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+
+    adc_continuous_config_t continuous_config = {
+        .pattern_num = 1,
+        .adc_pattern = &adc_pattern,
+        .sample_freq_hz = SAMPLE_RATE_HZ,
+        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1
+    };
+
+    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+}
+
+void stop_adc_sampling() {
+    ESP_LOGI(TAG, "Stopping ADC sampling");
+    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
+    ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+}
+
 static void generate_key_pair_task(void *pvParameters) {
     ESP_LOGI(TAG, "Generating RSA key pair...");
     int ret;
@@ -110,8 +144,8 @@ exit:
 static uint16_t sine_wave[BUFFER_SIZE / 2];
 
 void generate_sine_wave() {
-    for (int i = 0; i < BUFFER_SIZE / 2; i++) {
-        sine_wave[i] = (uint16_t)(2048 + 2047 * sin(2 * 3.141592 * SINE_WAVE_FREQ * i / SAMPLE_RATE));
+    for (int i = 0; i < 4094; i++) {
+        sine_wave[i] = i;
     }
 }
 
@@ -141,8 +175,11 @@ void timer_wait() {
 }
 
 void socket_task(void *pvParameters) {
-    generate_sine_wave();
-    my_timer_init();
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    char addr_str[128];
+    uint8_t buffer[BUF_SIZE];
+    uint32_t len;
 
     while (1) {
         if (new_sock == -1) {
@@ -150,8 +187,6 @@ void socket_task(void *pvParameters) {
             continue;
         }
 
-        struct sockaddr_in client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
         int client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_sock < 0) {
             ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
@@ -159,28 +194,34 @@ void socket_task(void *pvParameters) {
             new_sock = -1;
             continue;
         } else {
-            ESP_LOGI(TAG, "Client connected, IP: %s, Port: %d", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
+            ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
+
+        start_adc_sampling();
 
         while (1) {
-            int len = send(client_sock, sine_wave, BUFFER_SIZE, 0);
-            if (len < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
-            } else if (len == 0) {
-                ESP_LOGW(TAG, "Connection closed");
-                break;
+            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+            if (ret == ESP_OK && len > 0) {
+                if (send(client_sock, buffer, len, 0) < 0) {
+                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                    break;
+                }
+            } else {
+                read_miss_count++;
+                ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                if (read_miss_count >= 10) {
+                    ESP_LOGE(TAG, "Critical ADC data loss detected.");
+                    read_miss_count = 0;
+                }
             }
-            //ESP_LOGI(TAG, "Sent %d bytes", len);
-
-            // Esperar el tiempo exacto usando el temporizador de hardware
-            timer_wait();
         }
 
+        stop_adc_sampling();
         close(client_sock);
+        ESP_LOGI(TAG, "Client disconnected");
     }
 }
-
 int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len) {
     int ret;
     mbedtls_pk_context pk;
@@ -518,6 +559,27 @@ static esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info) {
     return ESP_OK;
 }
 
+void init_sine_wave() {
+    dac_cosine_handle_t chan0_handle;
+    dac_cosine_config_t cos0_cfg = {
+        .chan_id = DAC_CHAN_0,
+        .freq_hz = 10000,             // Frecuencia de la señal senoidal en Hz
+        .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
+        .offset = 0,
+        .phase = DAC_COSINE_PHASE_0,
+        .atten = DAC_COSINE_ATTEN_DEFAULT,
+        .flags.force_set_freq = true, 
+    };
+
+    ESP_ERROR_CHECK(dac_cosine_new_channel(&cos0_cfg, &chan0_handle));
+    ESP_ERROR_CHECK(dac_cosine_start(chan0_handle));
+}
+
+void dac_sine_wave_task(void *pvParameters) {
+    init_sine_wave();
+    vTaskDelete(NULL);  // Finalizamos la tarea una vez que la señal está configurada
+}
+
 static esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str, int new_port) {
     cJSON *response = cJSON_CreateObject();
     ESP_LOGI(TAG, "IP: %s, Port: %d", ip_str, new_port);
@@ -665,6 +727,8 @@ void app_main(void) {
 
     ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
+    xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
+
     // Inicializar Wi-Fi
     wifi_init();
 
@@ -672,5 +736,5 @@ void app_main(void) {
     start_webserver();
 
     // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 4096, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 15000, NULL, 5, &socket_task_handle, 1);
 }

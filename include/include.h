@@ -22,6 +22,9 @@
 #include <esp_task_wdt.h>
 #include <driver/timer.h>
 #include <math.h>
+#include "driver/dac_cosine.h"  // Cambiamos la librería para el DAC
+#include "esp_adc/adc_continuous.h"
+#include "esp_netif.h"
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -33,6 +36,13 @@
 #define TIMER_BASE_CLK 80000000 // 80 MHz
 #define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER) // Convert counter value to seconds
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
+#define MAX_CLIENTS 100
+#define ADC_CHANNEL ADC_CHANNEL_5
+#define SAMPLE_RATE_HZ 2000000 // 2 MHz
+#define BUF_SIZE 4096
+
+static adc_continuous_handle_t adc_handle;
+static int read_miss_count = 0;
 
 /**
  * @brief Initialize Wi-Fi in APSTA mode.
@@ -220,15 +230,6 @@ static esp_err_t create_and_bind_socket(esp_netif_ip_info_t *ip_info);
  * @param req Pointer to the HTTP request structure.
  */
 esp_err_t get_public_key_handler(httpd_req_t *req);
-
-/**
- * @brief Get socket IP and port for internal mode.
- * 
- * @param ip_str Buffer to store IP string.
- * @param new_port Pointer to store the port number.
- * @return esp_err_t ESP_OK on success, ESP_FAIL on error.
- */
-static esp_err_t get_socket_ip_and_port(char *ip_str, int *new_port);
 
 /**
  * @brief Send internal mode response.
