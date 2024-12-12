@@ -39,7 +39,7 @@
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
-#define BUF_SIZE 4096
+#define BUF_SIZE 8192
 
 static adc_continuous_handle_t adc_handle;
 static int read_miss_count = 0;
