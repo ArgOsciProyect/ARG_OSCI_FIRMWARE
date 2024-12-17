@@ -52,7 +52,7 @@ void start_adc_sampling() {
     };
 
     adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 6,
+        .max_store_buf_size = BUF_SIZE * 8,
         .conv_frame_size = 128,
     };
 
@@ -67,6 +67,7 @@ void start_adc_sampling() {
     };
 
     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
 }
 
@@ -120,10 +121,10 @@ static void generate_key_pair_task(void *pvParameters) {
         goto exit;
     }
     else {
-        ESP_LOGI(TAG, "Private Key:\n%s", (char*)private_key);
+        //ESP_LOGI(TAG, "Private Key:\n%s", (char*)private_key);
     }
 
-    ESP_LOGI(TAG, "Public Key:\n%s", (char*)public_key);
+    //ESP_LOGI(TAG, "Public Key:\n%s", (char*)public_key);
 
 exit:
     mbedtls_pk_free(&pk);
@@ -135,18 +136,6 @@ exit:
 
     // Eliminar la tarea
     vTaskDelete(NULL);
-}
-
-
-#define SAMPLE_RATE 2000000 // 2 MHz
-#define BUFFER_SIZE 8192 // 8192 bytes (4096 samples)
-#define SINE_WAVE_FREQ 1000 // 1 kHz sine wave
-static uint16_t sine_wave[BUFFER_SIZE / 2];
-
-void generate_sine_wave() {
-    for (int i = 0; i < 4094; i++) {
-        sine_wave[i] = i;
-    }
 }
 
 void my_timer_init() {
@@ -178,7 +167,7 @@ void socket_task(void *pvParameters) {
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
-    uint8_t buffer[BUF_SIZE];
+    uint8_t buffer[BUF_SIZE*2];
     uint32_t len;
 
     while (1) {
@@ -203,6 +192,12 @@ void socket_task(void *pvParameters) {
         while (1) {
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             if (ret == ESP_OK && len > 0) {
+                //for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                //    adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                //    uint16_t adc_value = adc_data->type1.data;
+                //    ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
+                //    vTaskDelay(1 / portTICK_PERIOD_MS);
+                //}
                 if (send(client_sock, buffer, len, 0) < 0) {
                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                     break;
@@ -563,7 +558,7 @@ void init_sine_wave() {
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
         .chan_id = DAC_CHAN_0,
-        .freq_hz = 10000,             // Frecuencia de la señal senoidal en Hz
+        .freq_hz = 1000,             // Frecuencia de la señal senoidal en Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,
         .phase = DAC_COSINE_PHASE_0,
@@ -736,5 +731,5 @@ void app_main(void) {
     start_webserver();
 
     // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 15000, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 30000, NULL, 5, &socket_task_handle, 1);
 }

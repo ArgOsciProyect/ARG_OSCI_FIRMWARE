@@ -25,6 +25,10 @@
 #include "driver/dac_cosine.h"  // Cambiamos la librería para el DAC
 #include "esp_adc/adc_continuous.h"
 #include "esp_netif.h"
+#include "driver/i2s.h"
+#include "driver/adc.h"
+#include "esp_mac.h"
+
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -38,7 +42,7 @@
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
-#define SAMPLE_RATE_HZ 2000000 // 2 MHz
+#define SAMPLE_RATE_HZ 1600000 // 2 MHz
 #define BUF_SIZE 8192
 
 static adc_continuous_handle_t adc_handle;
