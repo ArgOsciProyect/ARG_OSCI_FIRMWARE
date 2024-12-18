@@ -52,7 +52,7 @@ void start_adc_sampling() {
     };
 
     adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 8,
+        .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
     };
 
@@ -167,7 +167,7 @@ void socket_task(void *pvParameters) {
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
-    uint8_t buffer[BUF_SIZE*2];
+    uint8_t buffer[BUF_SIZE];
     uint32_t len;
 
     while (1) {
@@ -558,7 +558,7 @@ void init_sine_wave() {
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
         .chan_id = DAC_CHAN_0,
-        .freq_hz = 1000,             // Frecuencia de la señal senoidal en Hz
+        .freq_hz = 10000,             // Frecuencia de la señal senoidal en Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,
         .phase = DAC_COSINE_PHASE_0,
@@ -731,5 +731,5 @@ void app_main(void) {
     start_webserver();
 
     // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 30000, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 50000, NULL, 5, &socket_task_handle, 1);
 }
