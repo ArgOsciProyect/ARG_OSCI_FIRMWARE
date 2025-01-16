@@ -320,6 +320,7 @@ httpd_handle_t start_second_webserver(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
+    config.server_port = 80;
     if (httpd_start(&second_server, &config) == ESP_OK) {
         httpd_uri_t test_uri = {
             .uri = "/test",
@@ -499,9 +500,22 @@ esp_err_t connect_wifi_handler(httpd_req_t *req) {
     inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
     int new_port = ntohs(new_addr.sin_port);
 
+    // Obtener la BSSID del AP al que está conectado el ESP32
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get AP info");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "IP", ip_str);
     cJSON_AddNumberToObject(response, "Port", new_port);
+    char bssid_str[18];
+    snprintf(bssid_str, sizeof(bssid_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
+             ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5]);
+    cJSON_AddStringToObject(response, "BSSID", bssid_str);
     const char *json_response = cJSON_Print(response);
     httpd_resp_send(req, json_response, strlen(json_response));
     cJSON_Delete(response);
@@ -620,6 +634,16 @@ esp_err_t internal_mode_handler(httpd_req_t *req) {
 }
 
 esp_err_t get_public_key_handler(httpd_req_t *req) {
+
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    
+    // Si es una solicitud OPTIONS, responder OK
+    if (req->method == HTTP_OPTIONS) {
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     cJSON *response = cJSON_CreateObject();
     if (response == NULL) {
         return httpd_resp_send_500(req);
