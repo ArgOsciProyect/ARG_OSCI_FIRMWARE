@@ -117,6 +117,13 @@ static void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record);
 static cJSON* scan_and_get_ap_records(uint16_t *num_networks);
 
 /**
+ * Safely closes a socket with graceful shutdown attempt first, then force if needed
+ * @param sock Socket file descriptor to close 
+ * @return ESP_OK on success, ESP_FAIL on error
+ */
+static esp_err_t safe_close(int sock) ;
+
+/**
  * @brief HTTP handler for test endpoint.
  * 
  * @param req HTTP request.
