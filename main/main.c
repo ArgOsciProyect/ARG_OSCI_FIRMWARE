@@ -153,11 +153,42 @@ void my_timer_init() {
     timer_start(TIMER_GROUP_0, TIMER_0);
 }
 
+static esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_output, size_t output_size)
+{
+    // Base64 decode
+    unsigned char decoded[512];
+    size_t decoded_len;
+    int ret = mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
+                                    (unsigned char *)encrypted_base64,
+                                    strlen(encrypted_base64));
+    if (ret != 0)
+    {
+        ESP_LOGE(TAG, "Base64 decode failed: %d", ret);
+        return ESP_FAIL;
+    }
 
-void timer_wait() {
+    // Decrypt
+    size_t decrypted_len = output_size;
+    ret = decrypt_with_private_key(decoded, decoded_len,
+                                   (unsigned char *)decrypted_output,
+                                   &decrypted_len);
+    if (ret != 0)
+    {
+        ESP_LOGE(TAG, "Decryption failed: %d", ret);
+        return ESP_FAIL;
+    }
+
+    // Ensure null termination
+    decrypted_output[decrypted_len] = '\0';
+    return ESP_OK;
+}
+
+void timer_wait()
+{
     uint64_t timer_val;
     timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
-    while (timer_val < TIMER_INTERVAL_US * (TIMER_SCALE / 1000000)) {
+    while (timer_val < TIMER_INTERVAL_US * (TIMER_SCALE / 1000000))
+    {
         timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
     }
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
@@ -228,18 +259,21 @@ int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned ch
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
 
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers))) != 0) {
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers))) != 0)
+    {
         ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
         goto exit;
     }
 
-    if ((ret = mbedtls_pk_parse_key(&pk, private_key, strlen((char *)private_key) + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+    if ((ret = mbedtls_pk_parse_key(&pk, private_key, strlen((char *)private_key) + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0)
+    {
         ESP_LOGE(TAG, "mbedtls_pk_parse_key returned %d", ret);
         goto exit;
     }
 
-    size_t max_output_len = *output_len;  // Assume *output_len is the buffer size
-    if ((ret = mbedtls_pk_decrypt(&pk, input, input_len, output, output_len, max_output_len, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+    size_t max_output_len = *output_len; // Assume *output_len is the buffer size
+    if ((ret = mbedtls_pk_decrypt(&pk, input, input_len, output, output_len, max_output_len, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0)
+    {
         ESP_LOGE(TAG, "mbedtls_pk_decrypt returned %d", ret);
         ESP_LOGE(TAG, "output_len: %d", *output_len);
         goto exit;
@@ -298,7 +332,8 @@ esp_err_t scan_wifi_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-esp_err_t test_handler(httpd_req_t *req) {
+esp_err_t test_handler(httpd_req_t *req)
+{
     ESP_LOGI(TAG, "Test handler called");
     cJSON *root = cJSON_CreateArray();
     cJSON *item = cJSON_CreateObject();
@@ -307,13 +342,77 @@ esp_err_t test_handler(httpd_req_t *req) {
     const char *json_response = cJSON_Print(root);
     httpd_resp_send(req, json_response, strlen(json_response));
     cJSON_Delete(root);
+httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Copy the encrypted message since we'll free root
+    char *encrypted_copy = strdup(encrypted_msg->valuestring);
+    if (!encrypted_copy)
+    {
+        ESP_LOGI(TAG, "Failed to copy encrypted message");
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Free root as we don't need it anymore
+    cJSON_Delete(root);
+
+    // Decrypt message
+    char decrypted[256];
+    if (decrypt_base64_message(encrypted_copy, decrypted, sizeof(decrypted)) != ESP_OK)
+    {
+        ESP_LOGI(TAG, "Failed to decrypt message");
+        free(encrypted_copy);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Free encrypted copy as we don't need it anymore
+    free(encrypted_copy);
+
+    // Create response
+    cJSON *response = cJSON_CreateObject();
+    if (!response)
+    {
+        ESP_LOGI(TAG, "Failed to create response object");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    if (!cJSON_AddStringToObject(response, "decrypted", decrypted))
+    {
+        ESP_LOGI(TAG, "Failed to add string to response");
+        cJSON_Delete(response);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    const char *json_response = cJSON_Print(response);
+    if (!json_response)
+    {
+        ESP_LOGI(TAG, "Failed to print response");
+        cJSON_Delete(response);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Send response
+    esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
+
+    // Cleanup in reverse order of allocation
     free((void *)json_response);
-    return ESP_OK;
+cJSON_Delete(response);
+
+    return ret;
 }
 
-httpd_handle_t start_second_webserver(void) {
+httpd_handle_t start_second_webserver(void)
+{
     // Detener el servidor existente si ya está en ejecución
-    if (second_server != NULL) {
+    if (second_server != NULL)
+    {
         httpd_stop(second_server);
         second_server = NULL;
     }
@@ -321,85 +420,70 @@ httpd_handle_t start_second_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 80;
-    if (httpd_start(&second_server, &config) == ESP_OK) {
+    config.stack_size = 4096 * 1.5;
+    if (httpd_start(&second_server, &config) == ESP_OK)
+    {
         httpd_uri_t test_uri = {
             .uri = "/test",
-            .method = HTTP_GET,
+            .method = HTTP_POST,
             .handler = test_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &test_uri);
     }
 
     return second_server;
 }
-static esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config) {
-    char content[KEYSIZE]; // Aumentar el tamaño del buffer para acomodar datos encriptados
+
+static esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config)
+{
+    char content[KEYSIZE];
     int ret = httpd_req_recv(req, content, sizeof(content));
     ESP_LOGI(TAG, "Received content: %s", content);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+    if (ret <= 0)
+    {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
             httpd_resp_send_408(req);
         }
         return ESP_FAIL;
     }
+
     cJSON *root = cJSON_Parse(content);
-    if (root == NULL) {
+    if (root == NULL)
+    {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
+
     cJSON *ssid_encrypted = cJSON_GetObjectItem(root, "SSID");
     cJSON *password_encrypted = cJSON_GetObjectItem(root, "Password");
-    if (!cJSON_IsString(ssid_encrypted) || !cJSON_IsString(password_encrypted)) {
+    if (!cJSON_IsString(ssid_encrypted) || !cJSON_IsString(password_encrypted))
+    {
         httpd_resp_send_408(req);
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "SSID: %s", ssid_encrypted->valuestring);
-    ESP_LOGI(TAG, "Password: %s", password_encrypted->valuestring);
-
-    // Decodificar SSID en base64
-    unsigned char ssid_decoded[512];
-    size_t ssid_decoded_len;
-    if ((ret = mbedtls_base64_decode(ssid_decoded, sizeof(ssid_decoded), &ssid_decoded_len, (unsigned char *)ssid_encrypted->valuestring, strlen(ssid_encrypted->valuestring))) != 0) {
-        ESP_LOGE(TAG, "mbedtls_base64_decode returned %d", ret);
-        ESP_LOGE(TAG, "ssid_decoded_len: %d", ssid_decoded_len);
-        httpd_resp_send_500(req);
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-
-    // Decodificar Password en base64
-    unsigned char password_decoded[512];
-    size_t password_decoded_len;
-    if ((ret = mbedtls_base64_decode(password_decoded, sizeof(password_decoded), &password_decoded_len, (unsigned char *)password_encrypted->valuestring, strlen(password_encrypted->valuestring))) != 0) {
-        ESP_LOGE(TAG, "mbedtls_base64_decode returned %d", ret);
-        ESP_LOGE(TAG, "password_decoded_len: %d", password_decoded_len);
-        httpd_resp_send_500(req);
         cJSON_Delete(root);
         return ESP_FAIL;
     }
 
     // Desencriptar SSID
-    unsigned char ssid_decrypted[512];
-    size_t ssid_decrypted_len = sizeof(ssid_decrypted);
-    if (decrypt_with_private_key(ssid_decoded, ssid_decoded_len, ssid_decrypted, &ssid_decrypted_len) != 0) {
+    char ssid_decrypted[512];
+    if (decrypt_base64_message(ssid_encrypted->valuestring, ssid_decrypted, sizeof(ssid_decrypted)) != ESP_OK)
+    {
         httpd_resp_send_500(req);
         cJSON_Delete(root);
         return ESP_FAIL;
     }
 
     // Desencriptar Password
-    unsigned char password_decrypted[512];
-    size_t password_decrypted_len = sizeof(password_decrypted);
-    if (decrypt_with_private_key(password_decoded, password_decoded_len, password_decrypted, &password_decrypted_len) != 0) {
+    char password_decrypted[512];
+    if (decrypt_base64_message(password_encrypted->valuestring, password_decrypted, sizeof(password_decrypted)) != ESP_OK)
+    {
         httpd_resp_send_500(req);
         cJSON_Delete(root);
         return ESP_FAIL;
     }
 
-    strncpy((char *)wifi_config->sta.ssid, (char *)ssid_decrypted, sizeof(wifi_config->sta.ssid));
-    strncpy((char *)wifi_config->sta.password, (char *)password_decrypted, sizeof(wifi_config->sta.password));
+    strncpy((char *)wifi_config->sta.ssid, ssid_decrypted, sizeof(wifi_config->sta.ssid));
+    strncpy((char *)wifi_config->sta.password, password_decrypted, sizeof(wifi_config->sta.password));
     cJSON_Delete(root);
     return ESP_OK;
 }
