@@ -1,13 +1,17 @@
 #include "include.h"
 
 static const char *TAG = "ESP32_AP";
-static int new_sock = -1;
-static httpd_handle_t second_server = NULL;
 static TaskHandle_t socket_task_handle = NULL;
+static httpd_handle_t second_server = NULL;
+static SemaphoreHandle_t key_gen_semaphore;
 static unsigned char public_key[KEYSIZE];
 static unsigned char private_key[KEYSIZE];
-static SemaphoreHandle_t key_gen_semaphore;
+static int new_sock = -1;
+static spi_device_handle_t spi_handle = NULL;
+
+#ifdef CONFIG_HEAP_TRACING
 static heap_trace_record_t trace_record[HEAP_TRACE_ITEMS];
+#endif
 
 static esp_err_t safe_close(int sock)
 {
@@ -64,24 +68,88 @@ static esp_err_t safe_close(int sock)
     return ret;
 }
 
-void init_heap_trace(void) {
+#ifdef DEBUG_SPI_SIGNAL
+#define FAKE_DATA_FREQ 1000 // 1kHz
+static uint8_t fake_data_buffer[BUF_SIZE];
+static spi_device_handle_t spi_slave_handle = NULL;
+static TaskHandle_t spi_fake_task_handle = NULL;
+
+// Generar datos sintéticos (ej: onda senoidal)
+static void generate_fake_data()
+{
+    static float phase = 0;
+    for (int i = 0; i < BUF_SIZE; i++)
+    {
+        fake_data_buffer[i] = (uint8_t)(127 + 127 * sin(phase));
+        phase += 2 * 3.14159 * FAKE_DATA_FREQ / BUF_SIZE;
+        if (phase >= 2 * 3.14159)
+            phase -= 2 * 3.14159;
+    }
+}
+
+static void init_spi_slave()
+{
+    spi_bus_config_t buscfg = {
+        .miso_io_num = 13,
+        .mosi_io_num = 15,
+        .sclk_io_num = 14,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = BUF_SIZE};
+
+    spi_slave_interface_config_t slvcfg = {
+        .mode = 0,
+        .spics_io_num = 21,
+        .queue_size = 3,
+        .flags = 0,
+    };
+
+    ESP_ERROR_CHECK(spi_slave_initialize(SPI3_HOST, &buscfg, &slvcfg, SPI_DMA_CH_AUTO));
+}
+
+static void fake_data_task(void *pvParameters)
+{
+    spi_slave_transaction_t t;
+
+    // Initialize SPI slave first
+    init_spi_slave();
+
+    while (1)
+    {
+        generate_fake_data();
+
+        memset(&t, 0, sizeof(t));
+        t.length = BUF_SIZE * 8;
+        t.tx_buffer = fake_data_buffer;
+        t.rx_buffer = NULL;
+
+        ESP_ERROR_CHECK(spi_slave_transmit(SPI3_HOST, &t, portMAX_DELAY));
+    }
+}
+#endif
+
+#ifdef CONFIG_HEAP_TRACING
+void init_heap_trace(void)
+{
     ESP_ERROR_CHECK(heap_trace_init_standalone(trace_record, HEAP_TRACE_ITEMS));
 }
 
-void test_memory_leaks(void) {
+void test_memory_leaks(void)
+{
     // Iniciar rastreo
     ESP_ERROR_CHECK(heap_trace_start(HEAP_TRACE_LEAKS));
-    
+
     // Ejecutar la función a probar
-    httpd_req_t req;  // Mock request
+    httpd_req_t req; // Mock request
     test_handler(&req);
-    
+
     // Detener rastreo
     ESP_ERROR_CHECK(heap_trace_stop());
-    
+
     // Imprimir resultados
     heap_trace_dump();
 }
+#endif
 
 void wifi_init()
 {
@@ -117,41 +185,6 @@ void wifi_init()
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-void start_adc_sampling()
-{
-    ESP_LOGI(TAG, "Starting ADC sampling");
-
-    adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .channel = ADC_CHANNEL,
-        .bit_width = ADC_BITWIDTH_9};
-
-    adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 2,
-        .conv_frame_size = 128,
-    };
-
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
-
-    adc_continuous_config_t continuous_config = {
-        .pattern_num = 1,
-        .adc_pattern = &adc_pattern,
-        .sample_freq_hz = SAMPLE_RATE_HZ,
-        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
-
-    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
-
-    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
-}
-
-void stop_adc_sampling()
-{
-    ESP_LOGI(TAG, "Stopping ADC sampling");
-    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
-    ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
 }
 
 static void generate_key_pair_task(void *pvParameters)
@@ -282,13 +315,79 @@ void timer_wait()
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
 }
 
-void socket_task(void *pvParameters)
+static void spi_init_bus_and_device(void)
+{
+    spi_bus_config_t buscfg = {
+        .miso_io_num = 19,
+        .mosi_io_num = 23,
+        .sclk_io_num = 18,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = BUF_SIZE};
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 1 * 1000 * 1000,
+        .mode = 0,
+        .spics_io_num = 5,
+        .queue_size = 3};
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, &spi_handle));
+}
+
+static esp_err_t read_from_spi(uint8_t *buffer, size_t *out_len)
+{
+    uint8_t dummy_tx[1] = {0}; // Sin datos reales a transmitir
+    spi_transaction_t t = {
+        .length = BUF_SIZE * 8,
+        .rxlength = BUF_SIZE * 8,
+        .tx_buffer = dummy_tx,
+        .rx_buffer = buffer};
+    esp_err_t ret = spi_device_transmit(spi_handle, &t);
+    if (ret == ESP_OK)
+    {
+        *out_len = BUF_SIZE;
+    }
+    return ret;
+}
+
+void stop_spi()
+{
+    if (spi_handle)
+    {
+        spi_bus_remove_device(spi_handle);
+        spi_handle = NULL;
+    }
+    spi_bus_free(SPI2_HOST);
+}
+
+static bool is_valid_spi_data(const uint8_t *buffer, size_t len) {
+    if (len < 3) { // Mínimo: header + 1 dato + footer
+        return false;
+    }
+    
+    // Verificar header y footer
+    if (buffer[0] != SPI_VALID_HEADER || buffer[len-1] != SPI_VALID_FOOTER) {
+        return false;
+    }
+    
+    // Verificar que los datos estén en rango válido
+    for (size_t i = 1; i < len-1; i++) {
+        if (buffer[i] < MIN_VALID_VALUE || buffer[i] > MAX_VALID_VALUE) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+static void socket_task(void *pvParameters)
 {
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
     uint8_t buffer[BUF_SIZE];
-    uint32_t len;
+    size_t len;
+
+    spi_init_bus_and_device();
 
     while (1)
     {
@@ -297,64 +396,38 @@ void socket_task(void *pvParameters)
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             continue;
         }
-
         int client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_sock < 0)
         {
-            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
             close(new_sock);
             new_sock = -1;
             continue;
         }
-        else
-        {
-            inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
-            ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
-        }
-
-        start_adc_sampling();
+        inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
 
         while (1)
         {
-            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-            if (ret == ESP_OK && len > 0)
+            if (read_from_spi(buffer, &len) == ESP_OK && len > 0)
             {
-                // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                //     uint16_t adc_value = adc_data->type1.data;
-                //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
-                //     vTaskDelay(1 / portTICK_PERIOD_MS);
-                // }
-                int flags = MSG_MORE;
-                ssize_t sent = send(client_sock, buffer, len, flags);
+                ssize_t sent = send(client_sock, buffer, len, MSG_MORE);
                 if (sent < 0)
                 {
                     if (errno == EAGAIN || errno == EWOULDBLOCK)
                     {
-                        // Buffer lleno, esperar
                         vTaskDelay(pdMS_TO_TICKS(10));
                         continue;
                     }
-                    ESP_LOGE(TAG, "Send error: errno %d", errno);
                     break;
                 }
             }
             else
             {
-                read_miss_count++;
-                ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
-                if (read_miss_count >= 10)
-                {
-                    ESP_LOGE(TAG, "Critical ADC data loss detected.");
-                    read_miss_count = 0;
-                }
+                ESP_LOGW(TAG, "SPI read error");
             }
         }
-
-        stop_adc_sampling();
         safe_close(client_sock);
-        ESP_LOGI(TAG, "Client disconnected");
     }
+    stop_spi();
 }
 
 int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len)
@@ -1015,4 +1088,8 @@ void app_main(void)
 
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreatePinnedToCore(socket_task, "socket_task", 50000, NULL, 5, &socket_task_handle, 1);
+#ifdef DEBUG_SPI_SIGNAL
+    // Create fake data task on core 0
+    xTaskCreatePinnedToCore(fake_data_task, "fake_data_task", 4096, NULL, 5, &spi_fake_task_handle, 0);
+#endif
 }

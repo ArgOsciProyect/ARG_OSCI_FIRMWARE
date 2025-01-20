@@ -3,31 +3,31 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#include <esp_wifi.h>
-#include <esp_event.h>
-#include <esp_log.h>
-#include <nvs_flash.h>
-#include <lwip/sockets.h>
-#include <esp_http_server.h>
-#include <cJSON.h>
-#include <esp_netif.h> 
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <mbedtls/pk.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/error.h>
-#include <mbedtls/base64.h>
-#include <esp_task_wdt.h>
-#include <driver/timer.h>
-#include <math.h>
-#include "driver/dac_cosine.h"  
-#include "esp_adc/adc_continuous.h"
+#include "nvs_flash.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
 #include "esp_netif.h"
-#include "driver/i2s.h"
-#include "driver/adc.h"
-#include "esp_mac.h"
+#include "esp_system.h"
+#include "esp_spi_flash.h"
+#include "driver/spi_slave.h"
+#include "esp_http_server.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/spi_master.h"
+#include "esp_task_wdt.h"
+#include "mbedtls/base64.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/entropy.h"
+#include "cJSON.h"
+#include "driver/dac_cosine.h"
+#include "esp_err.h"
+#include "esp_heap_trace.h"
+#include "driver/timer.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include <math.h>
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -44,8 +44,15 @@
 #define SAMPLE_RATE_HZ 1600000 // 2 MHz
 #define BUF_SIZE 8192*4
 
-static adc_continuous_handle_t adc_handle;
-static int read_miss_count = 0;
+#define SPI_VALID_HEADER 0xAA
+#define SPI_VALID_FOOTER 0x55
+#define MIN_VALID_VALUE 0   // Ajustar según rango esperado
+#define MAX_VALID_VALUE 255 // Ajustar según rango esperado
+
+
+#define DEBUG_SPI_SIGNAL 1
+
+
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"
@@ -97,7 +104,7 @@ void timer_wait();
  * 
  * @param pvParameters Parameters for the task.
  */
-void socket_task(void *pvParameters);
+static void socket_task(void *pvParameters);
 
 /**
  * @brief HTTP handler to scan for available Wi-Fi networks.
