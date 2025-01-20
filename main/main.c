@@ -7,6 +7,7 @@ static TaskHandle_t socket_task_handle = NULL;
 static unsigned char public_key[KEYSIZE];
 static unsigned char private_key[KEYSIZE];
 static SemaphoreHandle_t key_gen_semaphore;
+static heap_trace_record_t trace_record[HEAP_TRACE_ITEMS];
 
 static esp_err_t safe_close(int sock)
 {
@@ -61,6 +62,25 @@ static esp_err_t safe_close(int sock)
     }
 
     return ret;
+}
+
+void init_heap_trace(void) {
+    ESP_ERROR_CHECK(heap_trace_init_standalone(trace_record, HEAP_TRACE_ITEMS));
+}
+
+void test_memory_leaks(void) {
+    // Iniciar rastreo
+    ESP_ERROR_CHECK(heap_trace_start(HEAP_TRACE_LEAKS));
+    
+    // Ejecutar la función a probar
+    httpd_req_t req;  // Mock request
+    test_handler(&req);
+    
+    // Detener rastreo
+    ESP_ERROR_CHECK(heap_trace_stop());
+    
+    // Imprimir resultados
+    heap_trace_dump();
 }
 
 void wifi_init()

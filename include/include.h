@@ -11,7 +11,7 @@
 #include <lwip/sockets.h>
 #include <esp_http_server.h>
 #include <cJSON.h>
-#include <esp_netif.h> // Incluir la biblioteca correcta
+#include <esp_netif.h> 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <mbedtls/pk.h>
@@ -22,13 +22,12 @@
 #include <esp_task_wdt.h>
 #include <driver/timer.h>
 #include <math.h>
-#include "driver/dac_cosine.h"  // Cambiamos la librería para el DAC
+#include "driver/dac_cosine.h"  
 #include "esp_adc/adc_continuous.h"
 #include "esp_netif.h"
 #include "driver/i2s.h"
 #include "driver/adc.h"
 #include "esp_mac.h"
-
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -47,6 +46,14 @@
 
 static adc_continuous_handle_t adc_handle;
 static int read_miss_count = 0;
+
+#ifdef CONFIG_HEAP_TRACING
+    #include "esp_heap_trace.h"
+    #define HEAP_TRACE_ITEMS 100
+    void init_heap_trace(void);
+    void test_memory_leaks(void);
+#endif
+
 
 /**
  * @brief Initialize Wi-Fi in APSTA mode.
