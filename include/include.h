@@ -50,7 +50,7 @@
 #define MAX_VALID_VALUE 255 // Ajustar según rango esperado
 
 
-#define DEBUG_SPI_SIGNAL 1
+//#define DEBUG_SPI_SIGNAL 0
 
 
 

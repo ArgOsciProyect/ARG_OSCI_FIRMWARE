@@ -325,7 +325,7 @@ static void spi_init_bus_and_device(void)
         .quadhd_io_num = -1,
         .max_transfer_sz = BUF_SIZE};
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1 * 1000 * 1000,
+        .clock_speed_hz = 40 * 1000 * 1000,
         .mode = 0,
         .spics_io_num = 5,
         .queue_size = 3};
