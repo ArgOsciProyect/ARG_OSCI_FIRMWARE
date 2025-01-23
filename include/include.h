@@ -41,7 +41,7 @@
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
-#define SAMPLE_RATE_HZ 1600000 // 2 MHz
+#define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define BUF_SIZE 8192*4
 
 static adc_continuous_handle_t adc_handle;
