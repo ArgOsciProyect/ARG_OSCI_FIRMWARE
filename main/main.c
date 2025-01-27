@@ -9,6 +9,64 @@ static unsigned char private_key[KEYSIZE];
 static SemaphoreHandle_t key_gen_semaphore;
 static heap_trace_record_t trace_record[HEAP_TRACE_ITEMS];
 
+// Helper functions for device configuration
+static double get_sampling_frequency(void)
+{
+    return 1650000.0; // Hardcoded for now, will be calculated later
+}
+
+static int get_bits_per_packet(void)
+{
+    return 16; // Current packet size in bits
+}
+
+static int get_data_mask(void)
+{
+    return 0x0FFF; // Mask for data bits
+}
+
+static int get_channel_mask(void)
+{
+    return 0x0F; // Mask for channel bits
+}
+
+static int get_useful_bits(void)
+{
+    return 9; // ADC resolution configured
+}
+
+static int get_samples_per_packet(void)
+{
+    return BUF_SIZE / 2; // Number of samples per send call
+}
+
+static esp_err_t config_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Config handler called");
+    httpd_resp_set_type(req, "application/json");
+
+    cJSON *config = cJSON_CreateObject();
+    if (config == NULL)
+    {
+        return httpd_resp_send_500(req);
+    }
+
+    cJSON_AddNumberToObject(config, "sampling_frequency", get_sampling_frequency());
+    cJSON_AddNumberToObject(config, "bits_per_packet", get_bits_per_packet());
+    cJSON_AddNumberToObject(config, "data_mask", get_data_mask());
+    cJSON_AddNumberToObject(config, "channel_mask", get_channel_mask());
+    cJSON_AddNumberToObject(config, "useful_bits", get_useful_bits());
+    cJSON_AddNumberToObject(config, "samples_per_packet", get_samples_per_packet());
+
+    const char *response = cJSON_Print(config);
+    esp_err_t ret = httpd_resp_send(req, response, strlen(response));
+
+    free((void *)response);
+    cJSON_Delete(config);
+
+    return ret;
+}
+
 static esp_err_t safe_close(int sock)
 {
     if (sock < 0)
@@ -64,21 +122,23 @@ static esp_err_t safe_close(int sock)
     return ret;
 }
 
-void init_heap_trace(void) {
+void init_heap_trace(void)
+{
     ESP_ERROR_CHECK(heap_trace_init_standalone(trace_record, HEAP_TRACE_ITEMS));
 }
 
-void test_memory_leaks(void) {
+void test_memory_leaks(void)
+{
     // Iniciar rastreo
     ESP_ERROR_CHECK(heap_trace_start(HEAP_TRACE_LEAKS));
-    
+
     // Ejecutar la función a probar
-    httpd_req_t req;  // Mock request
+    httpd_req_t req; // Mock request
     test_handler(&req);
-    
+
     // Detener rastreo
     ESP_ERROR_CHECK(heap_trace_stop());
-    
+
     // Imprimir resultados
     heap_trace_dump();
 }
@@ -124,13 +184,13 @@ void start_adc_sampling()
     ESP_LOGI(TAG, "Starting ADC sampling");
 
     adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
+        .atten = ADC_ATTEN_DB_0,
         .channel = ADC_CHANNEL,
         .bit_width = ADC_BITWIDTH_9};
 
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
-        .conv_frame_size = 128,
+        .conv_frame_size = 256,
     };
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
@@ -565,6 +625,13 @@ httpd_handle_t start_second_webserver(void)
             .handler = test_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &test_uri);
+
+        httpd_uri_t config_uri = {
+            .uri = "/config",
+            .method = HTTP_GET,
+            .handler = config_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &config_uri);
     }
 
     return second_server;
@@ -946,6 +1013,13 @@ httpd_handle_t start_webserver(void)
             .handler = scan_wifi_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(server, &scan_wifi_uri);
+
+        httpd_uri_t config_uri = {
+            .uri = "/config",
+            .method = HTTP_GET,
+            .handler = config_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &config_uri);
 
         httpd_uri_t connect_wifi_uri = {
             .uri = "/connect_wifi",
