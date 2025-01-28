@@ -989,6 +989,11 @@ esp_err_t get_public_key_handler(httpd_req_t *req)
     return ret;
 }
 
+static esp_err_t test_connect_handler(httpd_req_t *req)
+{
+    return httpd_resp_send(req, "1", 1);
+}
+
 httpd_handle_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -999,6 +1004,13 @@ httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK)
     {
+
+        httpd_uri_t test_connect_uri = {
+            .uri = "/testConnect",
+            .method = HTTP_GET,
+            .handler = test_connect_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &test_connect_uri);
 
         httpd_uri_t get_public_key_uri = {
             .uri = "/get_public_key",
