@@ -19,8 +19,10 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 #include <mbedtls/base64.h>
+#include <driver/dac_oneshot.h>
 #include <esp_task_wdt.h>
 #include <driver/timer.h>
+#include <driver/ledc.h>
 #include <math.h>
 #include "driver/dac_cosine.h"  
 #include "esp_adc/adc_continuous.h"

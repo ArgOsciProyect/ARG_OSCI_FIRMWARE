@@ -184,13 +184,13 @@ void start_adc_sampling()
     ESP_LOGI(TAG, "Starting ADC sampling");
 
     adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_0,
+        .atten = ADC_ATTEN_DB_12,
         .channel = ADC_CHANNEL,
         .bit_width = ADC_BITWIDTH_9};
 
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
-        .conv_frame_size = 256,
+        .conv_frame_size = 128,
     };
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
@@ -604,6 +604,98 @@ esp_err_t test_handler(httpd_req_t *req)
     return ret;
 }
 
+// Add to global variables
+static ledc_channel_config_t ledc_channel;
+#define TRIGGER_PWM_FREQ     25000  // 25kHz
+#define TRIGGER_PWM_TIMER    LEDC_TIMER_0
+#define TRIGGER_PWM_CHANNEL  LEDC_CHANNEL_0
+#define TRIGGER_PWM_GPIO     GPIO_NUM_26  // Choose appropriate GPIO
+#define TRIGGER_PWM_RES      LEDC_TIMER_8_BIT  // 8-bit resolution (0-255)
+
+void init_trigger_pwm(void)
+{
+    ledc_timer_config_t ledc_timer = {
+        .duty_resolution = TRIGGER_PWM_RES,
+        .freq_hz = TRIGGER_PWM_FREQ,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = TRIGGER_PWM_TIMER,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+    ledc_channel.channel = TRIGGER_PWM_CHANNEL;
+    ledc_channel.duty = 0;
+    ledc_channel.gpio_num = TRIGGER_PWM_GPIO;
+    ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
+    ledc_channel.hpoint = 0;
+    ledc_channel.timer_sel = TRIGGER_PWM_TIMER;
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+}
+
+static esp_err_t set_trigger_level(int percentage)
+{
+    if (percentage < 0 || percentage > 100)
+    {
+        return ESP_FAIL;
+    }
+
+    // Convert percentage to duty cycle (0-255)
+    uint32_t duty = (percentage * 255) / 100;
+    ESP_LOGI(TAG, "Setting PWM trigger to %d%% (duty: %lu)", percentage, duty);
+    
+    return ledc_set_duty(LEDC_LOW_SPEED_MODE, TRIGGER_PWM_CHANNEL, duty) == ESP_OK &&
+           ledc_update_duty(LEDC_LOW_SPEED_MODE, TRIGGER_PWM_CHANNEL) == ESP_OK ? 
+           ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t trigger_handler(httpd_req_t *req)
+{
+    char content[100];
+    int received = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (received <= 0)
+    {
+        return httpd_resp_send_408(req);
+    }
+    content[received] = '\0';
+
+    cJSON *root = cJSON_Parse(content);
+    if (!root)
+    {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *trigger = cJSON_GetObjectItem(root, "trigger_percentage");
+    if (!cJSON_IsNumber(trigger))
+    {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Get percentage and floor it
+    int percentage = (int)trigger->valuedouble;
+    esp_err_t ret = set_trigger_level(percentage);
+
+    cJSON_Delete(root);
+
+    if (ret != ESP_OK)
+    {
+        return httpd_resp_send_500(req);
+    }
+
+    // Send success response
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddNumberToObject(response, "set_percentage", percentage);
+    const char *json_response = cJSON_Print(response);
+    httpd_resp_send(req, json_response, strlen(json_response));
+
+    free((void *)json_response);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
 httpd_handle_t start_second_webserver(void)
 {
     // Detener el servidor existente si ya está en ejecución
@@ -632,6 +724,13 @@ httpd_handle_t start_second_webserver(void)
             .handler = config_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &config_uri);
+
+        httpd_uri_t trigger_uri = {
+            .uri = "/trigger",
+            .method = HTTP_POST,
+            .handler = trigger_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &trigger_uri);
     }
 
     return second_server;
@@ -1005,6 +1104,13 @@ httpd_handle_t start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK)
     {
 
+        httpd_uri_t trigger_uri = {
+            .uri = "/trigger",
+            .method = HTTP_POST,
+            .handler = trigger_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &trigger_uri);
+
         httpd_uri_t test_connect_uri = {
             .uri = "/testConnect",
             .method = HTTP_GET,
@@ -1092,6 +1198,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
+    init_trigger_pwm();  // Inicializar DAC para trigger
 
     // Inicializar Wi-Fi
     wifi_init();
