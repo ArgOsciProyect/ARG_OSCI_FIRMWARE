@@ -606,11 +606,11 @@ esp_err_t test_handler(httpd_req_t *req)
 
 // Add to global variables
 static ledc_channel_config_t ledc_channel;
-#define TRIGGER_PWM_FREQ     25000  // 25kHz
+#define TRIGGER_PWM_FREQ     78125  // 25kHz
 #define TRIGGER_PWM_TIMER    LEDC_TIMER_0
 #define TRIGGER_PWM_CHANNEL  LEDC_CHANNEL_0
 #define TRIGGER_PWM_GPIO     GPIO_NUM_26  // Choose appropriate GPIO
-#define TRIGGER_PWM_RES      LEDC_TIMER_8_BIT  // 8-bit resolution (0-255)
+#define TRIGGER_PWM_RES      LEDC_TIMER_10_BIT  // 8-bit resolution (0-255)
 
 void init_trigger_pwm(void)
 {
@@ -640,7 +640,7 @@ static esp_err_t set_trigger_level(int percentage)
     }
 
     // Convert percentage to duty cycle (0-255)
-    uint32_t duty = (percentage * 255) / 100;
+    uint32_t duty = (percentage * 1<<LEDC_TIMER_10_BIT) / 100;
     ESP_LOGI(TAG, "Setting PWM trigger to %d%% (duty: %lu)", percentage, duty);
     
     return ledc_set_duty(LEDC_LOW_SPEED_MODE, TRIGGER_PWM_CHANNEL, duty) == ESP_OK &&
