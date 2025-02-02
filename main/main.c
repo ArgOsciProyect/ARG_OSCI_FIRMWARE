@@ -8,6 +8,13 @@ static unsigned char public_key[KEYSIZE];
 static unsigned char private_key[KEYSIZE];
 static SemaphoreHandle_t key_gen_semaphore;
 static heap_trace_record_t trace_record[HEAP_TRACE_ITEMS];
+static uint64_t wait_time_us;
+
+// Global variables declaration
+static atomic_int mode = 0;
+static atomic_int last_state = 0;
+static int current_state = 0;
+#define GPIO_INPUT_PIN GPIO_NUM_11 // Reemplaza GPIO_NUM_4 con el pin que desees usar
 
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
@@ -191,6 +198,7 @@ void start_adc_sampling()
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
+        .flags = 0,
     };
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
@@ -285,20 +293,33 @@ exit:
     vTaskDelete(NULL);
 }
 
-void my_timer_init()
-{
+void my_timer_init() {
     timer_config_t config = {
         .divider = TIMER_DIVIDER,
-        .counter_dir = TIMER_COUNT_UP,
+        .counter_dir = TIMER_COUNT_DOWN,
         .counter_en = TIMER_PAUSE,
         .alarm_en = TIMER_ALARM_EN,
-        .auto_reload = TIMER_AUTORELOAD_EN,
+        .auto_reload = TIMER_AUTORELOAD_DIS,
     };
     timer_init(TIMER_GROUP_0, TIMER_0, &config);
-    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
-    timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, TIMER_INTERVAL_US * (TIMER_SCALE / 1000000));
+
+    // Calcular el tiempo de espera en microsegundos
+    double sampling_frequency = get_sampling_frequency();
+    wait_time_us = (BUF_SIZE / sampling_frequency) * 1000000;
+
+    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
+    timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, 0); // Alarma en 0
     timer_enable_intr(TIMER_GROUP_0, TIMER_0);
-    timer_start(TIMER_GROUP_0, TIMER_0);
+}
+
+void configure_gpio(void) {
+    gpio_config_t io_conf;
+    io_conf.intr_type = GPIO_INTR_DISABLE; // No interrupciones
+    io_conf.mode = GPIO_MODE_INPUT; // Configurar como entrada
+    io_conf.pin_bit_mask = (1ULL << GPIO_INPUT_PIN); // Seleccionar el pin
+    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE; // Deshabilitar pull-down
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE; // Habilitar pull-up
+    gpio_config(&io_conf);
 }
 
 static esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_output, size_t output_size)
@@ -331,15 +352,22 @@ static esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decr
     return ESP_OK;
 }
 
-void timer_wait()
-{
+void timer_wait() {
+    // Iniciar el temporizador
+    timer_start(TIMER_GROUP_0, TIMER_0);
+
+    // Esperar hasta que el temporizador alcance el valor de alarma (0)
     uint64_t timer_val;
-    timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
-    while (timer_val < TIMER_INTERVAL_US * (TIMER_SCALE / 1000000))
-    {
+    while (1) {
         timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
+        if (timer_val == 0) {
+            break;
+        }
     }
-    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0x00000000ULL);
+
+    // Reiniciar el temporizador
+    timer_pause(TIMER_GROUP_0, TIMER_0);
+    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
 }
 
 void socket_task(void *pvParameters)
@@ -376,38 +404,84 @@ void socket_task(void *pvParameters)
 
         while (1)
         {
-            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-            if (ret == ESP_OK && len > 0)
-            {
-                // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                //     uint16_t adc_value = adc_data->type1.data;
-                //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
-                //     vTaskDelay(1 / portTICK_PERIOD_MS);
-                // }
-                int flags = MSG_MORE;
-                ssize_t sent = send(client_sock, buffer, len, flags);
-                if (sent < 0)
+            if(mode == 0){
+                int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+                if (ret == ESP_OK && len > 0)
                 {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                    //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                    //     uint16_t adc_value = adc_data->type1.data;
+                    //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
+                    //     vTaskDelay(1 / portTICK_PERIOD_MS);
+                    // }
+                    int flags = MSG_MORE;
+                    ssize_t sent = send(client_sock, buffer, len, flags);
+                    if (sent < 0)
                     {
-                        // Buffer lleno, esperar
-                        vTaskDelay(pdMS_TO_TICKS(10));
-                        continue;
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            // Buffer lleno, esperar
+                            vTaskDelay(pdMS_TO_TICKS(10));
+                            continue;
+                        }
+                        ESP_LOGE(TAG, "Send error: errno %d", errno);
+                        break;
                     }
-                    ESP_LOGE(TAG, "Send error: errno %d", errno);
-                    break;
                 }
-            }
-            else
-            {
-                read_miss_count++;
-                ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
-                if (read_miss_count >= 10)
+                else
                 {
-                    ESP_LOGE(TAG, "Critical ADC data loss detected.");
-                    read_miss_count = 0;
+                    read_miss_count++;
+                    ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                    if (read_miss_count >= 10)
+                    {
+                        ESP_LOGE(TAG, "Critical ADC data loss detected.");
+                        read_miss_count = 0;
+                    }
                 }
+            } else{
+                current_state = gpio_get_level(GPIO_INPUT_PIN);
+
+                // Detectar cambio de flanco
+                if (current_state == last_state) {
+                    continue;
+                } else {
+                    timer_wait();
+                    int ret = adc_continuous_read(adc_handle, buffer, 2*BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+                    if (ret == ESP_OK && len > 0)
+                    {
+                        // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                        //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                        //     uint16_t adc_value = adc_data->type1.data;
+                        //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
+                        //     vTaskDelay(1 / portTICK_PERIOD_MS);
+                        // }
+                        int flags = MSG_MORE;
+                        ssize_t sent = send(client_sock, buffer, len, flags);
+                        if (sent < 0)
+                        {
+                            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                            {
+                                // Buffer lleno, esperar
+                                vTaskDelay(pdMS_TO_TICKS(10));
+                                continue;
+                            }
+                            ESP_LOGE(TAG, "Send error: errno %d", errno);
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        read_miss_count++;
+                        ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                        if (read_miss_count >= 10)
+                        {
+                            ESP_LOGE(TAG, "Critical ADC data loss detected.");
+                            read_miss_count = 0;
+                        }
+                    }
+                    mode = 0;
+                }
+                
             }
         }
 
@@ -696,6 +770,31 @@ static esp_err_t trigger_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t single_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Single handler called");
+
+    // Leer el estado actual del pin de entrada
+    last_state = gpio_get_level(GPIO_INPUT_PIN);
+
+    // Cambiar el estado de la variable mode
+    mode = 1;
+
+    // Responder con un mensaje de éxito
+    const char *response = "Single mode activated";
+    return httpd_resp_send(req, response, strlen(response));
+}
+
+static esp_err_t normal_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Normal handler called");
+
+    // Cambiar el estado de la variable mode
+    mode = 0;
+
+    // Responder con un mensaje de éxito
+    const char *response = "Normal mode activated";
+    return httpd_resp_send(req, response, strlen(response));
+}
+
 httpd_handle_t start_second_webserver(void)
 {
     // Detener el servidor existente si ya está en ejecución
@@ -731,6 +830,20 @@ httpd_handle_t start_second_webserver(void)
             .handler = trigger_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &trigger_uri);
+
+        httpd_uri_t single_uri = {
+            .uri = "/single",
+            .method = HTTP_GET,
+            .handler = single_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &single_uri);
+
+        httpd_uri_t normal_uri = {
+            .uri = "/normal",
+            .method = HTTP_GET,
+            .handler = normal_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &normal_uri);
     }
 
     return second_server;
@@ -1093,65 +1206,87 @@ static esp_err_t test_connect_handler(httpd_req_t *req)
     return httpd_resp_send(req, "1", 1);
 }
 
-httpd_handle_t start_webserver(void)
-{
+httpd_handle_t start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 81;
     config.ctrl_port = 32767;
     config.stack_size = 4096 * 4;
     httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) == ESP_OK)
-    {
+    if (httpd_start(&server, &config) == ESP_OK) {
 
         httpd_uri_t trigger_uri = {
             .uri = "/trigger",
             .method = HTTP_POST,
             .handler = trigger_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &trigger_uri);
 
         httpd_uri_t test_connect_uri = {
             .uri = "/testConnect",
             .method = HTTP_GET,
             .handler = test_connect_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &test_connect_uri);
 
         httpd_uri_t get_public_key_uri = {
             .uri = "/get_public_key",
             .method = HTTP_GET,
             .handler = get_public_key_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &get_public_key_uri);
 
         httpd_uri_t scan_wifi_uri = {
             .uri = "/scan_wifi",
             .method = HTTP_GET,
             .handler = scan_wifi_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &scan_wifi_uri);
 
         httpd_uri_t config_uri = {
             .uri = "/config",
             .method = HTTP_GET,
             .handler = config_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &config_uri);
 
         httpd_uri_t connect_wifi_uri = {
             .uri = "/connect_wifi",
             .method = HTTP_POST,
             .handler = connect_wifi_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &connect_wifi_uri);
 
         httpd_uri_t internal_mode_uri = {
             .uri = "/internal_mode",
             .method = HTTP_GET,
             .handler = internal_mode_handler,
-            .user_ctx = NULL};
+            .user_ctx = NULL
+        };
         httpd_register_uri_handler(server, &internal_mode_uri);
+
+        // Registrar los nuevos URI
+        httpd_uri_t single_uri = {
+            .uri = "/single",
+            .method = HTTP_GET,
+            .handler = single_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &single_uri);
+
+        httpd_uri_t normal_uri = {
+            .uri = "/normal",
+            .method = HTTP_GET,
+            .handler = normal_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &normal_uri);
     }
 
     return server;
@@ -1205,6 +1340,10 @@ void app_main(void)
 
     // Iniciar servidor web
     start_webserver();
+
+    // Iniciar el temporizador
+    my_timer_init();
+    configure_gpio();
 
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreatePinnedToCore(socket_task, "socket_task", 50000, NULL, 5, &socket_task_handle, 1);
