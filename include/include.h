@@ -11,25 +11,21 @@
 #include <lwip/sockets.h>
 #include <esp_http_server.h>
 #include <cJSON.h>
-#include <esp_netif.h> 
+#include <esp_netif.h>
 #include <freertos/FreeRTOS.h>
+#include <stdatomic.h>
 #include <freertos/task.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 #include <mbedtls/base64.h>
-#include <driver/dac_oneshot.h>
 #include <esp_task_wdt.h>
 #include <driver/timer.h>
 #include <driver/ledc.h>
-#include <math.h>
-#include "driver/dac_cosine.h"  
+#include "driver/dac_cosine.h"
 #include "esp_adc/adc_continuous.h"
-#include "esp_netif.h"
-#include "driver/i2s.h"
 #include "driver/adc.h"
-#include "esp_mac.h"
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -45,6 +41,7 @@
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define BUF_SIZE 8192*4
+#define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11
 
 static adc_continuous_handle_t adc_handle;
 static int read_miss_count = 0;

@@ -198,7 +198,7 @@ void start_adc_sampling()
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
-        .flags = 0,
+        .flags = {0},
     };
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
@@ -298,7 +298,7 @@ void my_timer_init() {
         .divider = TIMER_DIVIDER,
         .counter_dir = TIMER_COUNT_DOWN,
         .counter_en = TIMER_PAUSE,
-        .alarm_en = TIMER_ALARM_EN,
+        .alarm_en = TIMER_ALARM_DIS, // Deshabilitar la alarma
         .auto_reload = TIMER_AUTORELOAD_DIS,
     };
     timer_init(TIMER_GROUP_0, TIMER_0, &config);
@@ -308,8 +308,6 @@ void my_timer_init() {
     wait_time_us = (BUF_SIZE / sampling_frequency) * 1000000;
 
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
-    timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, 0); // Alarma en 0
-    timer_enable_intr(TIMER_GROUP_0, TIMER_0);
 }
 
 void configure_gpio(void) {
@@ -321,6 +319,8 @@ void configure_gpio(void) {
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE; // Habilitar pull-up
     gpio_config(&io_conf);
 }
+
+
 
 static esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_output, size_t output_size)
 {
@@ -365,8 +365,10 @@ void timer_wait() {
         }
     }
 
-    // Reiniciar el temporizador
+    // Pausar el temporizador
     timer_pause(TIMER_GROUP_0, TIMER_0);
+
+    // Reiniciar el temporizador
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
 }
 
@@ -716,7 +718,7 @@ static esp_err_t set_trigger_level(int percentage)
     // Convert percentage to duty cycle (0-255)
     uint32_t duty = (percentage * 1<<LEDC_TIMER_10_BIT) / 100;
     ESP_LOGI(TAG, "Setting PWM trigger to %d%% (duty: %lu)", percentage, duty);
-    
+
     return ledc_set_duty(LEDC_LOW_SPEED_MODE, TRIGGER_PWM_CHANNEL, duty) == ESP_OK &&
            ledc_update_duty(LEDC_LOW_SPEED_MODE, TRIGGER_PWM_CHANNEL) == ESP_OK ? 
            ESP_OK : ESP_FAIL;
@@ -807,6 +809,9 @@ httpd_handle_t start_second_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 80;
+    config.max_uri_handlers = 9; // Increase from default 8 to accommodate all handlers
+    config.max_resp_headers = 8;  // Increase if needed
+    config.lru_purge_enable = true; // Enable LRU mechanism
     config.stack_size = 4096 * 1.5;
     if (httpd_start(&second_server, &config) == ESP_OK)
     {
@@ -1206,69 +1211,68 @@ static esp_err_t test_connect_handler(httpd_req_t *req)
     return httpd_resp_send(req, "1", 1);
 }
 
-httpd_handle_t start_webserver(void) {
+httpd_handle_t start_webserver(void)
+{
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 81;
     config.ctrl_port = 32767;
     config.stack_size = 4096 * 4;
+    config.max_uri_handlers = 9; // Increase from default 8 to accommodate all handlers
+    config.max_resp_headers = 8;  // Increase if needed
+    config.lru_purge_enable = true; // Enable LRU mechanism
+
     httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) == ESP_OK) {
+    if (httpd_start(&server, &config) == ESP_OK)
+    {
 
         httpd_uri_t trigger_uri = {
             .uri = "/trigger",
             .method = HTTP_POST,
             .handler = trigger_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &trigger_uri);
 
         httpd_uri_t test_connect_uri = {
             .uri = "/testConnect",
             .method = HTTP_GET,
             .handler = test_connect_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &test_connect_uri);
 
         httpd_uri_t get_public_key_uri = {
             .uri = "/get_public_key",
             .method = HTTP_GET,
             .handler = get_public_key_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &get_public_key_uri);
 
         httpd_uri_t scan_wifi_uri = {
             .uri = "/scan_wifi",
             .method = HTTP_GET,
             .handler = scan_wifi_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &scan_wifi_uri);
 
         httpd_uri_t config_uri = {
             .uri = "/config",
             .method = HTTP_GET,
             .handler = config_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_uri);
 
         httpd_uri_t connect_wifi_uri = {
             .uri = "/connect_wifi",
             .method = HTTP_POST,
             .handler = connect_wifi_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &connect_wifi_uri);
 
         httpd_uri_t internal_mode_uri = {
             .uri = "/internal_mode",
             .method = HTTP_GET,
             .handler = internal_mode_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &internal_mode_uri);
 
         // Registrar los nuevos URI
@@ -1276,16 +1280,14 @@ httpd_handle_t start_webserver(void) {
             .uri = "/single",
             .method = HTTP_GET,
             .handler = single_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &single_uri);
 
         httpd_uri_t normal_uri = {
             .uri = "/normal",
             .method = HTTP_GET,
             .handler = normal_handler,
-            .user_ctx = NULL
-        };
+            .user_ctx = NULL};
         httpd_register_uri_handler(server, &normal_uri);
     }
 
