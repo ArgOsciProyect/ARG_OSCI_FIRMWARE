@@ -295,7 +295,7 @@ exit:
 
 void my_timer_init() {
     timer_config_t config = {
-        .divider = TIMER_DIVIDER,
+        .divider = 80,
         .counter_dir = TIMER_COUNT_DOWN,
         .counter_en = TIMER_PAUSE,
         .alarm_en = TIMER_ALARM_DIS, // Deshabilitar la alarma
@@ -311,6 +311,9 @@ void my_timer_init() {
 }
 
 void configure_gpio(void) {
+    // Alimentar el watchdog antes de configurar el GPIO
+    esp_task_wdt_reset();
+
     gpio_config_t io_conf;
     io_conf.intr_type = GPIO_INTR_DISABLE; // No interrupciones
     io_conf.mode = GPIO_MODE_INPUT; // Configurar como entrada
@@ -318,6 +321,9 @@ void configure_gpio(void) {
     io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE; // Deshabilitar pull-down
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE; // Habilitar pull-up
     gpio_config(&io_conf);
+
+    // Alimentar el watchdog después de configurar el GPIO
+    esp_task_wdt_reset();
 }
 
 
