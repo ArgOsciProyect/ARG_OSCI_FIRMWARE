@@ -429,7 +429,11 @@ void socket_task(void *pvParameters)
                 bool edge_detected = (trigger_edge == 1) ? 
                                     (current_state > last_state) :  // Positive edge
                                     (current_state < last_state);   // Negative edge
-            
+
+                //TODO Ver si usar un valor diferente de delay para positivo o negativo
+                //TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
+
+
                 if (!edge_detected) {
                     last_state = current_state;  // Update state only if no edge detected
                     continue;
@@ -437,6 +441,7 @@ void socket_task(void *pvParameters)
                 last_state = current_state;  // Update state after edge detection
             
                 // If we get here, edge was detected
+                
                 TickType_t xCurrentTime = xTaskGetTickCount();
                 vTaskDelay(pdMS_TO_TICKS(25)-(xCurrentTime - xLastWakeTime));
                 //esp_rom_delay_us(24824);
