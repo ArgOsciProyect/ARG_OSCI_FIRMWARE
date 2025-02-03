@@ -412,41 +412,8 @@ void socket_task(void *pvParameters)
 
         while (1)
         {
-            if(mode == 0){
-                int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-                if (ret == ESP_OK && len > 0)
-                {
-                    // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                    //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                    //     uint16_t adc_value = adc_data->type1.data;
-                    //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
-                    //     vTaskDelay(1 / portTICK_PERIOD_MS);
-                    // }
-                    int flags = MSG_MORE;
-                    ssize_t sent = send(client_sock, buffer, len, flags);
-                    if (sent < 0)
-                    {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK)
-                        {
-                            // Buffer lleno, esperar
-                            vTaskDelay(pdMS_TO_TICKS(10));
-                            continue;
-                        }
-                        ESP_LOGE(TAG, "Send error: errno %d", errno);
-                        break;
-                    }
-                }
-                else
-                {
-                    read_miss_count++;
-                    ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
-                    if (read_miss_count >= 10)
-                    {
-                        ESP_LOGE(TAG, "Critical ADC data loss detected.");
-                        read_miss_count = 0;
-                    }
-                }
-            } else{
+            if(mode == 1){
+                
                 current_state = gpio_get_level(GPIO_INPUT_PIN);
 
                 // Detectar cambio de flanco
@@ -456,44 +423,44 @@ void socket_task(void *pvParameters)
                     ESP_LOGE(TAG, "Modo single");
 
                     vTaskDelay(pdMS_TO_TICKS((BUF_SIZE/3300000)));
-                    int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-                    if (ret == ESP_OK && len > 0)
-                    {
-                        // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                        //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                        //     uint16_t adc_value = adc_data->type1.data;
-                        //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
-                        //     vTaskDelay(1 / portTICK_PERIOD_MS);
-                        // }
-                        int flags = MSG_MORE;
-                        ssize_t sent = send(client_sock, buffer, len, flags);
-                        if (sent < 0)
-                        {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                            {
-                                // Buffer lleno, esperar
-                                vTaskDelay(pdMS_TO_TICKS(10));
-                                continue;
-                            }
-                            ESP_LOGE(TAG, "Send error: errno %d", errno);
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        read_miss_count++;
-                        ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
-                        if (read_miss_count >= 10)
-                        {
-                            ESP_LOGE(TAG, "Critical ADC data loss detected.");
-                            read_miss_count = 0;
-                        }
-                    }
-                    ESP_LOGE(TAG, "Modo single DONE");
-
+                    
                     mode = 0;
+
+                    ESP_LOGE(TAG, "Modo single DONE");
                 }
-                
+            }
+            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+            if (ret == ESP_OK && len > 0)
+            {
+                // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
+                //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
+                //     uint16_t adc_value = adc_data->type1.data;
+                //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
+                //     vTaskDelay(1 / portTICK_PERIOD_MS);
+                // }
+                int flags = MSG_MORE;
+                ssize_t sent = send(client_sock, buffer, len, flags);
+                if (sent < 0)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // Buffer lleno, esperar
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                        continue;
+                    }
+                    ESP_LOGE(TAG, "Send error: errno %d", errno);
+                    break;
+                }
+            }
+            else
+            {
+                read_miss_count++;
+                ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                if (read_miss_count >= 10)
+                {
+                    ESP_LOGE(TAG, "Critical ADC data loss detected.");
+                    read_miss_count = 0;
+                }
             }
         }
 
