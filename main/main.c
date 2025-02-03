@@ -777,32 +777,34 @@ static esp_err_t trigger_handler(httpd_req_t *req)
 
     return ESP_OK;
 }
-
-static esp_err_t single_handler(httpd_req_t *req) {
+static esp_err_t single_handler(httpd_req_t *req)
+{
     ESP_LOGI(TAG, "Single handler called");
 
-    // Leer el estado actual del pin de entrada
+    // Set content type to JSON
+    httpd_resp_set_type(req, "application/json");
+
+    mode = 1;
     last_state = gpio_get_level(GPIO_INPUT_PIN);
 
-    // Cambiar el estado de la variable mode
-    mode = 1;
-
-    // Responder con un mensaje de éxito
-    const char *response = "Single mode activated";
+    // Simple JSON response
+    const char *response = "{\"mode\":\"Single\"}";
     return httpd_resp_send(req, response, strlen(response));
 }
 
-static esp_err_t normal_handler(httpd_req_t *req) {
+static esp_err_t normal_handler(httpd_req_t *req)
+{
     ESP_LOGI(TAG, "Normal handler called");
 
-    // Cambiar el estado de la variable mode
+    // Set content type to JSON
+    httpd_resp_set_type(req, "application/json");
+
     mode = 0;
 
-    // Responder con un mensaje de éxito
-    const char *response = "Normal mode activated";
+    // Simple JSON response
+    const char *response = "{\"mode\":\"Normal\"}";
     return httpd_resp_send(req, response, strlen(response));
 }
-
 httpd_handle_t start_second_webserver(void)
 {
     // Detener el servidor existente si ya está en ejecución
@@ -815,8 +817,8 @@ httpd_handle_t start_second_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 80;
-    config.max_uri_handlers = 9; // Increase from default 8 to accommodate all handlers
-    config.max_resp_headers = 8;  // Increase if needed
+    config.max_uri_handlers = 9;    // Increase from default 8 to accommodate all handlers
+    config.max_resp_headers = 8;    // Increase if needed
     config.lru_purge_enable = true; // Enable LRU mechanism
     config.stack_size = 4096 * 1.5;
     if (httpd_start(&second_server, &config) == ESP_OK)
