@@ -196,7 +196,7 @@ void start_adc_sampling()
         .bit_width = ADC_BITWIDTH_9};
 
     adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 2,
+        .max_store_buf_size = BUF_SIZE,
         .conv_frame_size = 128,
         .flags = {0},
     };
