@@ -14,7 +14,7 @@ static uint64_t wait_time_us;
 static atomic_int mode = 0;
 static atomic_int last_state = 0;
 static int current_state = 0;
-#define GPIO_INPUT_PIN GPIO_NUM_11 // Reemplaza GPIO_NUM_4 con el pin que desees usar
+#define GPIO_INPUT_PIN GPIO_NUM_13 // Reemplaza GPIO_NUM_4 con el pin que desees usar
 
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
@@ -312,7 +312,7 @@ void my_timer_init() {
 
 void configure_gpio(void) {
     // Alimentar el watchdog antes de configurar el GPIO
-    esp_task_wdt_reset();
+    //esp_task_wdt_reset();
 
     gpio_config_t io_conf;
     io_conf.intr_type = GPIO_INTR_DISABLE; // No interrupciones
@@ -323,7 +323,7 @@ void configure_gpio(void) {
     gpio_config(&io_conf);
 
     // Alimentar el watchdog después de configurar el GPIO
-    esp_task_wdt_reset();
+    //esp_task_wdt_reset();
 }
 
 
@@ -453,8 +453,10 @@ void socket_task(void *pvParameters)
                 if (current_state == last_state) {
                     continue;
                 } else {
-                    timer_wait();
-                    int ret = adc_continuous_read(adc_handle, buffer, 2*BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+                    ESP_LOGE(TAG, "Modo single");
+
+                    vTaskDelay(pdMS_TO_TICKS((BUF_SIZE/3300000)));
+                    int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
                     if (ret == ESP_OK && len > 0)
                     {
                         // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
@@ -487,6 +489,8 @@ void socket_task(void *pvParameters)
                             read_miss_count = 0;
                         }
                     }
+                    ESP_LOGE(TAG, "Modo single DONE");
+
                     mode = 0;
                 }
                 
@@ -1340,7 +1344,7 @@ void app_main(void)
         .trigger_panic = false,
     };
 
-    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+    //ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
     init_trigger_pwm();  // Inicializar DAC para trigger
@@ -1352,7 +1356,7 @@ void app_main(void)
     start_webserver();
 
     // Iniciar el temporizador
-    my_timer_init();
+    //my_timer_init();
     configure_gpio();
 
     // Crear la tarea para manejar el socket en el núcleo 1
