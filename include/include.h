@@ -38,7 +38,7 @@
 #define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER) // Convert counter value to seconds
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
-#define ADC_CHANNEL ADC_CHANNEL_5
+#define ADC_CHANNEL_A ADC_CHANNEL_5
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define BUF_SIZE 8192*5
 #define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11

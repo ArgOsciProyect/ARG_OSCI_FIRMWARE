@@ -16,6 +16,12 @@ static atomic_int last_state = 0;
 static atomic_int trigger_edge = 0;
 static atomic_int current_state = 0;
 #define GPIO_INPUT_PIN GPIO_NUM_13 // Reemplaza GPIO_NUM_4 con el pin que desees usar
+#define ADC_CHANNEL_B ADC_CHANNEL_4
+#define ADC_CHANNEL_C ADC_CHANNEL_6
+#define ADC_CHANNEL_D ADC_CHANNEL_7
+//#define ADC_CHANNEL_E ADC_CHANNEL_0
+//#define ADC_CHANNEL_F ADC_CHANNEL_3
+
 
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
@@ -191,10 +197,39 @@ void start_adc_sampling()
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
-    adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .channel = ADC_CHANNEL,
-        .bit_width = ADC_BITWIDTH_9};
+    // Configure ADC pattern for two channels
+    adc_digi_pattern_config_t adc_pattern[4] = {
+        {
+            .atten = ADC_ATTEN_DB_12,
+            .channel = ADC_CHANNEL_A,
+            .bit_width = ADC_BITWIDTH_9
+        },
+        {
+            .atten = ADC_ATTEN_DB_12,
+            .channel = ADC_CHANNEL_B,
+            .bit_width = ADC_BITWIDTH_9
+        },
+        {
+            .atten = ADC_ATTEN_DB_12,
+            .channel = ADC_CHANNEL_C,
+            .bit_width = ADC_BITWIDTH_9
+        },
+        {
+            .atten = ADC_ATTEN_DB_12,
+            .channel = ADC_CHANNEL_D,
+            .bit_width = ADC_BITWIDTH_9
+        },
+        //{
+        //    .atten = ADC_ATTEN_DB_12,
+        //    .channel = ADC_CHANNEL_E,
+        //    .bit_width = ADC_BITWIDTH_9
+        //}//,
+        //{
+        //    .atten = ADC_ATTEN_DB_12,
+        //    .channel = ADC_CHANNEL_F,
+        //    .bit_width = ADC_BITWIDTH_9
+        //}
+    };
 
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
@@ -205,11 +240,12 @@ void start_adc_sampling()
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
 
     adc_continuous_config_t continuous_config = {
-        .pattern_num = 1,
-        .adc_pattern = &adc_pattern,
+        .pattern_num = 4, // Number of patterns (channels)
+        .adc_pattern = adc_pattern,
         .sample_freq_hz = SAMPLE_RATE_HZ,
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1
+    };
 
     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
 

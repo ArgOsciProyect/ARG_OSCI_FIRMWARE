@@ -9,11 +9,18 @@
     "functional": "cpp",
     "esp_log.h": "c",
     "cjson.h": "c",
-    "format": "c"
+    "format": "c",
+    "include.h": "c",
+    "dac_cosine.h": "c",
+    "timer.h": "c",
+    "ledc.h": "c",
+    "adc_continuous.h": "c",
+    "adc.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
   "idf.adapterTargetName": "esp32",
   "idf.espIdfPath": "/home/jotalora/esp/v5.4/esp-idf",
-  "idf.toolsPath": "/home/jotalora/.espressif"
+  "idf.toolsPath": "/home/jotalora/.espressif",
+  "idf.portWin": "COM3"
 }
