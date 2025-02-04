@@ -23,6 +23,10 @@ static double get_sampling_frequency(void)
     return 1650000.0; // Hardcoded for now, will be calculated later
 }
 
+static int dividing_factor(void){
+    return 6;
+}
+
 static int get_bits_per_packet(void)
 {
     return 16; // Current packet size in bits
@@ -65,6 +69,7 @@ static esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "channel_mask", get_channel_mask());
     cJSON_AddNumberToObject(config, "useful_bits", get_useful_bits());
     cJSON_AddNumberToObject(config, "samples_per_packet", get_samples_per_packet());
+    cJSON_AddNumberToObject(config, "dividing_factor", dividing_factor());
 
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));
