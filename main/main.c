@@ -1,6 +1,6 @@
 #include "include.h"
 
-static const char *TAG = "ESP32_AP";
+static const char *TAG = "ESP32_AP2";
 static int new_sock = -1;
 static httpd_handle_t second_server = NULL;
 static TaskHandle_t socket_task_handle = NULL;
@@ -17,10 +17,18 @@ static atomic_int trigger_edge = 0;
 static atomic_int current_state = 0;
 #define GPIO_INPUT_PIN GPIO_NUM_13 // Reemplaza GPIO_NUM_4 con el pin que desees usar
 
+#define I2S_NUM         (0)
+#define SAMPLE_RATE     (2000000)
+#define ADC_CHANNEL     ADC1_CHANNEL_5
+
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
 {
     return 1650000.0; // Hardcoded for now, will be calculated later
+}
+
+static int dividing_factor(void){
+    return 1;
 }
 
 static int get_bits_per_packet(void)
@@ -65,6 +73,7 @@ static esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "channel_mask", get_channel_mask());
     cJSON_AddNumberToObject(config, "useful_bits", get_useful_bits());
     cJSON_AddNumberToObject(config, "samples_per_packet", get_samples_per_packet());
+    cJSON_AddNumberToObject(config, "dividing_factor", dividing_factor());
 
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));
@@ -187,40 +196,69 @@ void wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void start_adc_sampling()
+// void start_adc_sampling()
+// {
+//     ESP_LOGI(TAG, "Starting ADC sampling");
+
+//     adc_digi_pattern_config_t adc_pattern = {
+//         .atten = ADC_ATTEN_DB_12,
+//         .channel = ADC_CHANNEL,
+//         .bit_width = ADC_BITWIDTH_9,
+//         .unit = ADC_UNIT_1};
+
+//     adc_continuous_handle_cfg_t adc_config = {
+//         .max_store_buf_size = BUF_SIZE * 2,
+//         .conv_frame_size = 128,
+//         .flags.flush_pool = false,
+//     };
+
+//     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+
+//     adc_continuous_config_t continuous_config = {
+//         .pattern_num = 1,
+//         .adc_pattern = &adc_pattern,
+//         .sample_freq_hz = SAMPLE_RATE_HZ,
+//         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+//         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
+
+//     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+
+//     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+// }
+
+// void stop_adc_sampling()
+// {
+//     ESP_LOGI(TAG, "Stopping ADC sampling");
+//     ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
+//     ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+// }
+
+void i2s_adc_init()
 {
-    ESP_LOGI(TAG, "Starting ADC sampling");
+    // Configurar el ADC
+    adc1_config_width(ADC_WIDTH_BIT_9);
+    adc1_config_channel_atten(ADC_CHANNEL, ADC_ATTEN_DB_12);
 
-    adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .channel = ADC_CHANNEL,
-        .bit_width = ADC_BITWIDTH_9};
-
-    adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 2,
-        .conv_frame_size = 128,
-        .flags.flush_pool = false,
+    // Configurar el I2S en modo ADC
+    i2s_config_t i2s_config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN,
+        .sample_rate = SAMPLE_RATE,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
+        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 2,
+        .dma_buf_len = 2*BUF_SIZE,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
+        .fixed_mclk = 0
     };
 
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+    // Instalar y configurar el driver I2S
+    i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
 
-    adc_continuous_config_t continuous_config = {
-        .pattern_num = 1,
-        .adc_pattern = &adc_pattern,
-        .sample_freq_hz = SAMPLE_RATE_HZ,
-        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
-
-    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
-
-    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
-}
-
-void stop_adc_sampling()
-{
-    ESP_LOGI(TAG, "Stopping ADC sampling");
-    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
-    ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+    // Configurar el ADC para el I2S
+    i2s_set_adc_mode(ADC_UNIT_1, ADC_CHANNEL);
 }
 
 static void generate_key_pair_task(void *pvParameters)
@@ -412,7 +450,7 @@ void socket_task(void *pvParameters)
             ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
 
-        start_adc_sampling();
+        i2s_adc_enable(I2S_NUM);
 
         while (1)
         {
@@ -446,7 +484,7 @@ void socket_task(void *pvParameters)
                 vTaskDelay(pdMS_TO_TICKS(25)-(xCurrentTime - xLastWakeTime));
                 //esp_rom_delay_us(24824);
             }
-            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+            int ret = i2s_read(I2S_NUM, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             if (ret == ESP_OK && len > 0)
             {
                 // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
@@ -506,7 +544,7 @@ void socket_task(void *pvParameters)
             }
         }
 
-        stop_adc_sampling();
+        i2s_adc_disable(I2S_NUM);
         safe_close(client_sock);
         ESP_LOGI(TAG, "Client disconnected");
     }
@@ -1383,6 +1421,8 @@ void app_main(void)
     // Iniciar el temporizador
     // my_timer_init();
     configure_gpio();
+
+    i2s_adc_init();
 
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreatePinnedToCore(socket_task, "socket_task", 50000, NULL, 5, &socket_task_handle, 1);

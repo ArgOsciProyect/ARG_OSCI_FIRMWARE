@@ -26,8 +26,9 @@
 #include "driver/dac_cosine.h"
 #include "esp_adc/adc_continuous.h"
 #include "driver/adc.h"
+#include "driver/i2s.h"
 
-#define WIFI_SSID "ESP32_AP"
+#define WIFI_SSID "ESP32_AP2"
 #define WIFI_PASSWORD "password123"
 #define MAX_STA_CONN 4
 #define PORT 8080
