@@ -11,7 +11,8 @@
     "cjson.h": "c",
     "format": "c",
     "*.tcc": "cpp",
-    "typeinfo": "cpp"
+    "typeinfo": "cpp",
+    "esp_event.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
