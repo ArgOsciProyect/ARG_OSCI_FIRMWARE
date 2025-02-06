@@ -246,16 +246,21 @@ void i2s_adc_init()
     // Configurar el I2S en modo ADC
     i2s_config_t i2s_config = {
         .mode = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN,
-        .sample_rate = SAMPLE_RATE,
+        .sample_rate = SAMPLE_RATE*6, // Con fixed_mclk en 7M y esto en 1.5<n<1.8 muestrea más
+                                        // En n=1 muestrea más aún ¿¿¿???
+                                        // en n<1 muestrea menos
+                                        // en n> 1.8 pierde muestras
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
         .dma_buf_count = 2,
         .dma_buf_len = 1024,
-        .use_apll = true,
+        .use_apll = true,           // Esto en true para modificar fixed_mclk
         .tx_desc_auto_clear = true,
-        .fixed_mclk = 7000000 //ENTREGABA APARENTEMENTE UNA FRECUENCIA DE MUESTREO DE 3.5MHZ
+        .fixed_mclk = 70000000       // HAY QUE PROBAR COMBINACIONES DE SAMPLERATE CON FIXED MCLK (AUMENTAR AMBOS A LA VEZ PERO DE A UNO, SUBE UNO Y SI FALLA SUBO EL OTRO Y ASÍ)
+                                    // HAY QUE PROBAR TAMBIÉN CAMBIAR SAMPLERATE MIENTRAS USE APLL ES FALSE Y FIXEDMCLK ES 0
+                                    // HAY QUE PROBAR MODIFICAR FIXED MCLK CON APLL EN FALSE
     };
 
     
