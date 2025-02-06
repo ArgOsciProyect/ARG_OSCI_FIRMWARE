@@ -1,4 +1,6 @@
 #include "include.h"
+#include "soc/syscon_reg.h"
+#include "soc/syscon_struct.h"
 
 static const char *TAG = "ESP32_AP2";
 static int new_sock = -1;
@@ -19,7 +21,6 @@ static atomic_int current_state = 0;
 
 #define I2S_NUM         (0)
 #define SAMPLE_RATE     (2000000)
-#define ADC_CHANNEL     ADC1_CHANNEL_5
 
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
@@ -235,6 +236,9 @@ void wifi_init()
 
 void i2s_adc_init()
 {
+    SYSCON.saradc_ctrl.sar1_patt_p_clear = 0;
+    SYSCON.saradc_ctrl.sar1_patt_len = 0;
+
     // Configurar el ADC
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC_CHANNEL, ADC_ATTEN_DB_12);
@@ -244,18 +248,22 @@ void i2s_adc_init()
         .mode = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN,
         .sample_rate = SAMPLE_RATE,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = 0,
         .dma_buf_count = 2,
         .dma_buf_len = 1024,
-        .use_apll = false,
-        .tx_desc_auto_clear = false,
-        .fixed_mclk = 0
+        .use_apll = true,
+        .tx_desc_auto_clear = true,
+        .fixed_mclk = 7000000 //ENTREGABA APARENTEMENTE UNA FRECUENCIA DE MUESTREO DE 3.5MHZ
     };
+
+    
 
     // Instalar y configurar el driver I2S
     i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
+
+
 
     // Configurar el ADC para el I2S
     i2s_set_adc_mode(ADC_UNIT_1, ADC_CHANNEL);
@@ -1409,7 +1417,7 @@ void app_main(void)
 
     // ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
-    //xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
+    xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
     init_trigger_pwm(); // Inicializar DAC para trigger
 
     // Inicializar Wi-Fi

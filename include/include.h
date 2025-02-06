@@ -27,6 +27,7 @@
 #include "esp_adc/adc_continuous.h"
 #include "driver/adc.h"
 #include "driver/i2s.h"
+#include "adc_legacy.c"
 
 #define WIFI_SSID "ESP32_AP2"
 #define WIFI_PASSWORD "password123"
@@ -39,7 +40,7 @@
 #define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER) // Convert counter value to seconds
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
-#define ADC_CHANNEL ADC_CHANNEL_5
+#define ADC_CHANNEL ADC1_CHANNEL_0
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define BUF_SIZE 8192*5
 #define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11

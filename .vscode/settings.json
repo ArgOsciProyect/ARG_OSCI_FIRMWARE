@@ -11,7 +11,14 @@
     "cjson.h": "c",
     "format": "c",
     "*.tcc": "cpp",
-    "typeinfo": "cpp"
+    "typeinfo": "cpp",
+    "include.h": "c",
+    "adc.h": "c",
+    "adc_types_legacy.h": "c",
+    "gpio.h": "c",
+    "esp_rom_gpio.h": "c",
+    "gpio_etm.h": "c",
+    "adc_types.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
