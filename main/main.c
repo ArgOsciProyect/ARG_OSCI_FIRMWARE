@@ -13,6 +13,7 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include <math.h>
+#include <driver/ledc.h>
 
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE 2000000 // 2 MHz
@@ -25,6 +26,34 @@
 static const char *TAG = "ARG_OSCI";
 int read_miss_count = 0;
 uint32_t samples_p_second = 0;
+
+// Add to global variables
+static ledc_channel_config_t ledc_channel;
+#define TRIGGER_PWM_FREQ 3 // 25kHz
+#define TRIGGER_PWM_TIMER LEDC_TIMER_0
+#define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
+#define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
+#define TRIGGER_PWM_RES LEDC_TIMER_4_BIT // 4-bit resolution (0-16)
+
+void init_trigger_pwm(void)
+{
+    ledc_timer_config_t ledc_timer = {
+        .duty_resolution = TRIGGER_PWM_RES,
+        .freq_hz = TRIGGER_PWM_FREQ,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = TRIGGER_PWM_TIMER,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+    ledc_channel.channel = TRIGGER_PWM_CHANNEL;
+    ledc_channel.duty = 0;
+    ledc_channel.gpio_num = TRIGGER_PWM_GPIO;
+    ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
+    ledc_channel.hpoint = 0;
+    ledc_channel.timer_sel = TRIGGER_PWM_TIMER;
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+}
 
 void spi_master_init()
 {
@@ -105,7 +134,6 @@ void app_main() {
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    i2s_adc_init();
+    spi_master_init();
 
-    xTaskCreate(spi_test, "spi_test", BUF_SIZE * 1.3, NULL, 5, NULL);
 }
