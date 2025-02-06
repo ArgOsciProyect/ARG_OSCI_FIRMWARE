@@ -236,8 +236,15 @@ void wifi_init()
 
 void i2s_adc_init()
 {
-    SYSCON.saradc_ctrl.sar1_patt_p_clear = 0;
-    SYSCON.saradc_ctrl.sar1_patt_len = 0;
+    SYSCON.saradc_ctrl.sar1_patt_p_clear = 0;       // No se si sirve de algo
+    SYSCON.saradc_ctrl.sar1_patt_len = 0;           // Tampoco se si sirve algo
+                                                    // Esto fue un intento de solución relacionado con la pattern table que usa el adc para configurar los canales
+                                                    // FALTA PROBAR AGREGAR UN CANAL EXTRA Y PONERLO EN FUNCIONAMIENTO
+                                                    // FALTA VER BUFFER DE RX
+                                                    // FALTA MODIFICAR DESDE REGISTROS, USANDO LA LIBRERÍA SYSCON, LOS CLK DEL ADC
+                                                    // VER MEAS LIMIT DEL ADC Y MEAS MAX CREO QUE ERA (MEDIO QUE YA LOS PROBE Y NO ENTENDÍ QUE HACÍAN)
+                                                    // EL I2S HACE SOLICITUDES AL ADC MEDIANTE EL CICLO WS, NO SE QUE ES ESPECÍFICAMENTE Y SI SI PUEDE MODIFICAR DIRECTAMENTE
+
 
     // Configurar el ADC
     adc1_config_width(ADC_WIDTH_BIT_12);
