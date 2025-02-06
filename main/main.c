@@ -23,7 +23,8 @@ static double get_sampling_frequency(void)
     return 1650000.0; // Hardcoded for now, will be calculated later
 }
 
-static int dividing_factor(void){
+static int dividing_factor(void)
+{
     return 6;
 }
 
@@ -421,35 +422,35 @@ void socket_task(void *pvParameters)
 
         while (1)
         {
-            if (mode == 1) {
+            if (mode == 1)
+            {
                 TickType_t xLastWakeTime = xTaskGetTickCount();
                 current_state = gpio_get_level(GPIO_INPUT_PIN);
-            
+
                 //// Debug log moved before state update
-                //ESP_LOGI(TAG, "Current: %d, Previous: %d, Edge type: %s", 
-                //         current_state, last_state, 
-                //         trigger_edge ? "positive" : "negative");
-            
+                // ESP_LOGI(TAG, "Current: %d, Previous: %d, Edge type: %s",
+                //          current_state, last_state,
+                //          trigger_edge ? "positive" : "negative");
+
                 // Check for specific edge type
-                bool edge_detected = (trigger_edge == 1) ? 
-                                    (current_state > last_state) :  // Positive edge
-                                    (current_state < last_state);   // Negative edge
+                bool edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
+                                         (current_state < last_state);                    // Negative edge
 
-                //TODO Ver si usar un valor diferente de delay para positivo o negativo
-                //TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
+                // TODO Ver si usar un valor diferente de delay para positivo o negativo
+                // TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
 
-
-                if (!edge_detected) {
-                    last_state = current_state;  // Update state only if no edge detected
+                if (!edge_detected)
+                {
+                    last_state = current_state; // Update state only if no edge detected
                     continue;
                 }
-                last_state = current_state;  // Update state after edge detection
-            
+                last_state = current_state; // Update state after edge detection
+
                 // If we get here, edge was detected
-                
+
                 TickType_t xCurrentTime = xTaskGetTickCount();
-                vTaskDelay(pdMS_TO_TICKS(25)-(xCurrentTime - xLastWakeTime));
-                //esp_rom_delay_us(24824);
+                vTaskDelay(pdMS_TO_TICKS(25) - (xCurrentTime - xLastWakeTime));
+                // esp_rom_delay_us(24824);
             }
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             if (ret == ESP_OK && len > 0)
@@ -826,6 +827,68 @@ static esp_err_t single_handler(httpd_req_t *req)
     return httpd_resp_send(req, response, strlen(response));
 }
 
+static esp_err_t reset_socket_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Reset socket handler called");
+    
+    // Get appropriate IP info based on request source port
+    esp_netif_ip_info_t ip_info;
+    if (httpd_req_get_hdr_value_len(req, "Host") > 0) {
+        char host[32];
+        httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+        // Check if request came from AP server (port 81)
+        bool is_ap_server = (strstr(host, ":81") != NULL);
+        
+        if (is_ap_server) {
+            if (get_ap_ip_info(&ip_info) != ESP_OK) {
+                httpd_resp_send_500(req);
+                return ESP_FAIL;
+            }
+        } else {
+            if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK) {
+                httpd_resp_send_500(req);
+                return ESP_FAIL;
+            }
+        }
+    } else {
+        // Fallback to AP mode if can't determine source
+        if (get_ap_ip_info(&ip_info) != ESP_OK) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+    }
+
+    // Close existing socket if any
+    if (new_sock != -1) {
+        safe_close(new_sock);
+        new_sock = -1;
+    }
+
+    // Create and bind new socket
+    if (create_socket_and_bind(&ip_info) != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Get socket info
+    char ip_str[16];
+    struct sockaddr_in new_addr;
+    socklen_t new_addr_len = sizeof(new_addr);
+    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
+        ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
+        safe_close(new_sock);
+        new_sock = -1;
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
+    int new_port = ntohs(new_addr.sin_port);
+
+    // Send response
+    return send_internal_mode_response(req, ip_str, new_port);
+}
+
 static esp_err_t normal_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Normal handler called");
@@ -857,6 +920,13 @@ httpd_handle_t start_second_webserver(void)
     config.stack_size = 4096 * 1.5;
     if (httpd_start(&second_server, &config) == ESP_OK)
     {
+
+        httpd_uri_t reset_socket_uri = {
+            .uri = "/reset_socket",
+            .method = HTTP_GET,
+            .handler = reset_socket_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &reset_socket_uri);
         httpd_uri_t test_uri = {
             .uri = "/test",
             .method = HTTP_POST,
@@ -996,6 +1066,22 @@ static esp_err_t create_socket_and_bind(esp_netif_ip_info_t *ip_info)
     return ESP_OK;
 }
 
+
+
+static esp_err_t send_wifi_response(httpd_req_t *req, const char *ip, int port, bool success) {
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "IP", ip ? ip : "");
+    cJSON_AddNumberToObject(response, "Port", port);
+    cJSON_AddStringToObject(response, "Success", success ? "true" : "false");
+    
+    const char *json_response = cJSON_Print(response);
+    esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
+    
+    cJSON_Delete(response);
+    free((void *)json_response);
+    return ret;
+}
+
 esp_err_t connect_wifi_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Connecting to Wi-Fi network");
@@ -1007,7 +1093,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     if (parse_wifi_credentials(req, &wifi_config) != ESP_OK)
     {
-        return ESP_FAIL;
+        return send_wifi_response(req, "", 0, false);
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
@@ -1016,16 +1102,14 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi: %s", esp_err_to_name(err));
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return send_wifi_response(req, "", 0, false);
     }
 
     esp_netif_ip_info_t ip_info;
     if (wait_for_ip(&ip_info) != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to get IP address");
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return send_wifi_response(req, "", 0, false);
     }
 
     if (new_sock != -1)
@@ -1041,8 +1125,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     if (create_socket_and_bind(&ip_info) != ESP_OK)
     {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return send_wifi_response(req, "", 0, false);
     }
 
     char ip_str[16];
@@ -1053,38 +1136,19 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
         ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
         safe_close(new_sock);
         new_sock = -1;
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return send_wifi_response(req, "", 0, false);
     }
 
     inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
     int new_port = ntohs(new_addr.sin_port);
 
-    // Obtener la BSSID del AP al que está conectado el ESP32
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to get AP info");
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+    esp_err_t ret = send_wifi_response(req, ip_str, new_port, true);
+    
+    if (ret == ESP_OK) {
+        second_server = start_second_webserver();
     }
 
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "IP", ip_str);
-    cJSON_AddNumberToObject(response, "Port", new_port);
-    char bssid_str[18];
-    snprintf(bssid_str, sizeof(bssid_str), "%02x:%02x:%02x:%02x:%02x:%02x",
-             ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
-             ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5]);
-    cJSON_AddStringToObject(response, "BSSID", bssid_str);
-    const char *json_response = cJSON_Print(response);
-    httpd_resp_send(req, json_response, strlen(json_response));
-    cJSON_Delete(response);
-    free((void *)json_response);
-
-    second_server = start_second_webserver();
-
-    return ESP_OK;
+    return ret;
 }
 
 static esp_err_t get_ap_ip_info(esp_netif_ip_info_t *ip_info)
@@ -1260,13 +1324,20 @@ httpd_handle_t start_webserver(void)
     config.server_port = 81;
     config.ctrl_port = 32767;
     config.stack_size = 4096 * 4;
-    config.max_uri_handlers = 9;    // Increase from default 8 to accommodate all handlers
+    config.max_uri_handlers = 10;    // Increase from default 8 to accommodate all handlers
     config.max_resp_headers = 8;    // Increase if needed
     config.lru_purge_enable = true; // Enable LRU mechanism
 
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK)
     {
+
+        httpd_uri_t reset_socket_uri = {
+            .uri = "/reset_socket",
+            .method = HTTP_GET,
+            .handler = reset_socket_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &reset_socket_uri);
 
         httpd_uri_t trigger_uri = {
             .uri = "/trigger",
