@@ -17,7 +17,7 @@
 
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE 2000000 // 2 MHz
-#define BUF_SIZE 8192
+#define BUF_SIZE 2*8192
 #define PIN_NUM_MISO 12
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
@@ -30,7 +30,7 @@ uint32_t samples_p_second = 0;
 // Add to global variables
 static ledc_channel_config_t ledc_channel;
 static spi_device_handle_t spi;
-#define TRIGGER_PWM_FREQ 3000000 // 25kHz
+#define TRIGGER_PWM_FREQ 2500000 // 2.5MHz
 #define TRIGGER_PWM_TIMER LEDC_TIMER_0
 #define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
 #define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
@@ -64,6 +64,7 @@ void init_trigger_pwm(void)
 void spi_master_init()
 {
     esp_err_t ret;
+    int freq;
 
     // Configurar el bus SPI
     spi_bus_config_t buscfg = {
@@ -72,7 +73,7 @@ void spi_master_init()
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = BUF_SIZE
+        .max_transfer_sz = 2*BUF_SIZE
     };
 
     // Inicializar el bus SPI
@@ -84,7 +85,7 @@ void spi_master_init()
         .clock_speed_hz = 48 * 1000 * 1000, // Velocidad del reloj SPI (10 MHz)
         .mode = 0,                          // Modo SPI 0
         .spics_io_num = PIN_NUM_CS,         // Pin CS
-        .queue_size = BUF_SIZE,                    // Tamaño de la cola de transacciones
+        .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL                     // Callback después de cada transacción
     };
@@ -95,14 +96,23 @@ void spi_master_init()
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "SPI Master initialized.");
+    spi_device_get_actual_freq(spi, &freq);
+    ESP_LOGI(TAG, "Actual frequency: %d", freq);
+
 }
 
 void spi_test(void *pvParameters) {
-    uint8_t buffer[BUF_SIZE];
-    spi_transaction_t t;
-    memset(&t, 0, sizeof(t)); // Clear the transaction structure
-    t.length = BUF_SIZE * 8;  // Length in bits
-    t.rx_buffer = buffer;     // Pointer to the buffer to receive data
+
+    uint16_t buffer1[BUF_SIZE];
+    //uint16_t buffer2[BUF_SIZE];
+    spi_transaction_t t1;
+    memset(&t1, 0, sizeof(t1)); // Clear the transaction structure
+    t1.length = BUF_SIZE * 16;  // Length in bits
+    t1.rx_buffer = buffer1;     // Pointer to the buffer to receive data
+    // spi_transaction_t t2;
+    // memset(&t2, 0, sizeof(t2)); // Clear the transaction structure
+    // t2.length = BUF_SIZE * 16;  // Length in bits
+    // t2.rx_buffer = buffer2;     // Pointer to the buffer to receive data
     uint32_t len;
     uint32_t sum;
     const int duration_ms = 10000;  // Duración total de ejecución en milisegundos (10 segundos)
@@ -112,22 +122,33 @@ void spi_test(void *pvParameters) {
         sum = 0;
         start_time = xTaskGetTickCount(); // Marca el tiempo de inicio
         // Poner en cola la transacción
-        esp_err_t ret = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(ret);
+        esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
+        ESP_ERROR_CHECK(ret1);
+        // esp_err_t ret2 = spi_device_queue_trans(spi, &t2, 1000 / portTICK_PERIOD_MS);
+        // ESP_ERROR_CHECK(ret2);
 
         while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(duration_ms)){
              
              // Obtener el resultado de la transacción
-             spi_transaction_t *rtrans;
-             ret = spi_device_get_trans_result(spi, &rtrans, 1000 / portTICK_PERIOD_MS);
-             ESP_ERROR_CHECK(ret);
+             spi_transaction_t *rtrans1;
+             ret1 = spi_device_get_trans_result(spi, &rtrans1, 1000 / portTICK_PERIOD_MS);
+             ESP_ERROR_CHECK(ret1);
 
              // Poner en cola la transacción
-             esp_err_t ret = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
-             ESP_ERROR_CHECK(ret);
+             esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
+             ESP_ERROR_CHECK(ret1);
+
+            //  // Obtener el resultado de la transacción
+            //  spi_transaction_t *rtrans2;
+            //  ret2 = spi_device_get_trans_result(spi, &rtrans2, 1000 / portTICK_PERIOD_MS);
+            //  ESP_ERROR_CHECK(ret2);
+
+            //  // Poner en cola la transacción
+            //  esp_err_t ret2 = spi_device_queue_trans(spi, &t2, 1000 / portTICK_PERIOD_MS);
+            //  ESP_ERROR_CHECK(ret2);
  
-             if (ret == ESP_OK) {
-                 len = rtrans->rxlength / 8; // rxlength is in bits
+             if (ret1 == ESP_OK) {
+                 len = (rtrans1->rxlength) / 8; // rxlength is in bits
                  sum += len;
              } else {
                  read_miss_count++;
@@ -158,5 +179,6 @@ void app_main() {
     spi_master_init();
     init_trigger_pwm();
 
-    xTaskCreate(spi_test, "spi_test", BUF_SIZE * 2.6, NULL, 5, NULL);
+    xTaskCreate(spi_test, "spi_test", BUF_SIZE *3, NULL, 5, NULL);
 }
+
