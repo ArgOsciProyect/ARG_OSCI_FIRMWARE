@@ -33,9 +33,9 @@ static spi_device_handle_t spi;
 #define TRIGGER_PWM_FREQ 2500000 // 2.5MHz
 #define TRIGGER_PWM_TIMER LEDC_TIMER_0
 #define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
-#define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
+#define TRIGGER_PWM_GPIO GPIO_NUM_16      // Choose appropriate GPIO
 #define TRIGGER_PWM_RES LEDC_TIMER_4_BIT // 4-bit resolution (0-16)
-#define TRIGGER_PWM_DUTY 31.25          // 31.25% duty cycle
+#define TRIGGER_PWM_DUTY 5          // 31.25% duty cycle
 
 void init_trigger_pwm(void)
 {
@@ -49,15 +49,15 @@ void init_trigger_pwm(void)
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
     ledc_channel.channel = TRIGGER_PWM_CHANNEL;
-    ledc_channel.duty = 0;
+    ledc_channel.duty = 5;
     ledc_channel.gpio_num = TRIGGER_PWM_GPIO;
     ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
-    ledc_channel.hpoint = 0;
+    ledc_channel.hpoint = 11;
     ledc_channel.timer_sel = TRIGGER_PWM_TIMER;
+    
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-
-    ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, TRIGGER_PWM_DUTY);
-    ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
+    // ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, TRIGGER_PWM_DUTY);
+    // ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
 }
 
 
