@@ -449,7 +449,7 @@ void socket_task(void *pvParameters)
                 // If we get here, edge was detected
 
                 TickType_t xCurrentTime = xTaskGetTickCount();
-                vTaskDelay(pdMS_TO_TICKS(25) - (xCurrentTime - xLastWakeTime));
+                vTaskDelay(pdMS_TO_TICKS(12) - (xCurrentTime - xLastWakeTime));
                 // esp_rom_delay_us(24824);
             }
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
