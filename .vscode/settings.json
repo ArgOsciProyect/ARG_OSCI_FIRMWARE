@@ -12,7 +12,12 @@
     "format": "c",
     "*.tcc": "cpp",
     "typeinfo": "cpp",
-    "esp_event.h": "c"
+    "esp_event.h": "c",
+    "mcpwm.h": "c",
+    "mcpwm_prelude.h": "c",
+    "mcpwm_etm.h": "c",
+    "mcpwm_timer.h": "c",
+    "stdbool.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
