@@ -111,7 +111,7 @@ ESP_ERROR_CHECK(mcpwm_timer_set_phase_on_sync(timer, &sync_phase));
                     MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH))); // Cambiado a HIGH
 
     // Configurar el duty cycle - Ajustado para 22 ticks en bajo
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(22)));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(26)));
 
     ESP_LOGI(TAG, "Enable PWM generator output");
     ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
@@ -152,7 +152,8 @@ void spi_master_init()
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                     // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX,    // Explícitamente half-duplex
-        .cs_ena_pretrans = 12
+        .cs_ena_pretrans = 15,
+        .input_delay_ns = 25
     };
 
     // Inicializar el dispositivo SPI
@@ -175,7 +176,7 @@ void spi_test(void *pvParameters) {
     t1.rx_buffer = buffer1;      
     t1.flags = 0;               
 
-    for(int iter = 0; iter < 1000; iter++) {
+    for(int iter = 0; iter < 100; iter++) {
         // Realizar una única transacción
         esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
         ESP_ERROR_CHECK(ret1);
@@ -186,7 +187,7 @@ void spi_test(void *pvParameters) {
         ESP_ERROR_CHECK(ret1);
 
         if (ret1 == ESP_OK) {
-            if(iter == 999) {  // Solo mostrar la última iteración
+            if(iter == 99) {  // Solo mostrar la última iteración
                 ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
                 for (int i = 0; i < BUF_SIZE; i = i+200) {
                     printf("%5d\n", buffer1[i]);
