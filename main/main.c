@@ -134,7 +134,9 @@ void spi_master_init()
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 2*BUF_SIZE
+        .max_transfer_sz = 2*BUF_SIZE,
+        .flags = SPICOMMON_BUSFLAG_MASTER | // Modo maestro
+                SPICOMMON_BUSFLAG_MISO    // Solo línea MISO
     };
 
     // Inicializar el bus SPI
@@ -148,7 +150,9 @@ void spi_master_init()
         .spics_io_num = PIN_NUM_CS,         // Pin CS
         .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
-        .post_cb = NULL                     // Callback después de cada transacción
+        .post_cb = NULL,                     // Callback después de cada transacción
+        .flags = SPI_DEVICE_HALFDUPLEX,    // Explícitamente half-duplex
+        .cs_ena_pretrans = 12
     };
 
     // Inicializar el dispositivo SPI
@@ -163,66 +167,39 @@ void spi_master_init()
 }
 
 void spi_test(void *pvParameters) {
-
     uint16_t buffer1[BUF_SIZE];
-    //uint16_t buffer2[BUF_SIZE];
     spi_transaction_t t1;
-    memset(&t1, 0, sizeof(t1)); // Clear the transaction structure
-    t1.length = BUF_SIZE * 16;  // Length in bits
-    t1.rx_buffer = buffer1;     // Pointer to the buffer to receive data
-    // spi_transaction_t t2;
-    // memset(&t2, 0, sizeof(t2)); // Clear the transaction structure
-    // t2.length = BUF_SIZE * 16;  // Length in bits
-    // t2.rx_buffer = buffer2;     // Pointer to the buffer to receive data
-    uint32_t len;
-    uint32_t sum;
-    const int duration_ms = 10000;  // Duración total de ejecución en milisegundos (10 segundos)
-    TickType_t start_time;
+    memset(&t1, 0, sizeof(t1));
+    t1.length = 0;               
+    t1.rxlength = BUF_SIZE * 16; 
+    t1.rx_buffer = buffer1;      
+    t1.flags = 0;               
 
-    while (1) {
-        sum = 0;
-        start_time = xTaskGetTickCount(); // Marca el tiempo de inicio
-        // Poner en cola la transacción
+    for(int iter = 0; iter < 1000; iter++) {
+        // Realizar una única transacción
         esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
         ESP_ERROR_CHECK(ret1);
-        // esp_err_t ret2 = spi_device_queue_trans(spi, &t2, 1000 / portTICK_PERIOD_MS);
-        // ESP_ERROR_CHECK(ret2);
 
-        while ((xTaskGetTickCount() - start_time) < pdMS_TO_TICKS(duration_ms)){
-             
-             // Obtener el resultado de la transacción
-             spi_transaction_t *rtrans1;
-             ret1 = spi_device_get_trans_result(spi, &rtrans1, 1000 / portTICK_PERIOD_MS);
-             ESP_ERROR_CHECK(ret1);
+        // Obtener el resultado
+        spi_transaction_t *rtrans1;
+        ret1 = spi_device_get_trans_result(spi, &rtrans1, 1000 / portTICK_PERIOD_MS);
+        ESP_ERROR_CHECK(ret1);
 
-             // Poner en cola la transacción
-             esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
-             ESP_ERROR_CHECK(ret1);
-
-            //  // Obtener el resultado de la transacción
-            //  spi_transaction_t *rtrans2;
-            //  ret2 = spi_device_get_trans_result(spi, &rtrans2, 1000 / portTICK_PERIOD_MS);
-            //  ESP_ERROR_CHECK(ret2);
-
-            //  // Poner en cola la transacción
-            //  esp_err_t ret2 = spi_device_queue_trans(spi, &t2, 1000 / portTICK_PERIOD_MS);
-            //  ESP_ERROR_CHECK(ret2);
- 
-             if (ret1 == ESP_OK) {
-                 len = (rtrans1->rxlength) / 8; // rxlength is in bits
-                 sum += len;
-             } else {
-                 read_miss_count++;
-                 ESP_LOGW(TAG, "Missed SPI readings! Count: %d", read_miss_count);
-                 if (read_miss_count >= 10) {
-                     ESP_LOGE(TAG, "Critical SPI data loss detected.");
-                     read_miss_count = 0;
-                 }
-             }
+        if (ret1 == ESP_OK) {
+            if(iter == 999) {  // Solo mostrar la última iteración
+                ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
+                for (int i = 0; i < BUF_SIZE; i = i+200) {
+                    printf("%5d\n", buffer1[i]);
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "Error en la lectura SPI en iteración %d", iter + 1);
+            break;
         }
-        samples_p_second = sum / 20;
-        ESP_LOGI(TAG, "Samples per second: %lu", samples_p_second);
     }
+
+    // La tarea ha terminado
+    vTaskDelete(NULL);
 }
 
 void app_main() {
