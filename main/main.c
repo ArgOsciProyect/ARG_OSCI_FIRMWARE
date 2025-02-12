@@ -134,7 +134,9 @@ void spi_master_init()
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 2*BUF_SIZE
+        .max_transfer_sz = 2*BUF_SIZE,
+        .flags = SPICOMMON_BUSFLAG_MASTER | // Modo maestro
+                SPICOMMON_BUSFLAG_MISO    // Solo línea MISO
     };
 
     // Inicializar el bus SPI
@@ -148,7 +150,9 @@ void spi_master_init()
         .spics_io_num = PIN_NUM_CS,         // Pin CS
         .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
-        .post_cb = NULL                     // Callback después de cada transacción
+        .post_cb = NULL,                     // Callback después de cada transacción
+        .flags = SPI_DEVICE_HALFDUPLEX,    // Explícitamente half-duplex
+        .cs_ena_pretrans = 12
     };
 
     // Inicializar el dispositivo SPI
@@ -168,8 +172,10 @@ void spi_test(void *pvParameters) {
     //uint16_t buffer2[BUF_SIZE];
     spi_transaction_t t1;
     memset(&t1, 0, sizeof(t1)); // Clear the transaction structure
-    t1.length = BUF_SIZE * 16;  // Length in bits
-    t1.rx_buffer = buffer1;     // Pointer to the buffer to receive data
+    t1.length = 0;               
+    t1.rxlength = BUF_SIZE * 16; // 16 bits por muestra
+    t1.rx_buffer = buffer1;      
+    t1.flags = 0;               
     // spi_transaction_t t2;
     // memset(&t2, 0, sizeof(t2)); // Clear the transaction structure
     // t2.length = BUF_SIZE * 16;  // Length in bits
