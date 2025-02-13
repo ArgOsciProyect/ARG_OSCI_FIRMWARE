@@ -128,6 +128,15 @@ void spi_master_init()
     esp_err_t ret;
     int freq;
 
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << PIN_NUM_MISO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
     // Configurar el bus SPI
     spi_bus_config_t buscfg = {
         .miso_io_num = PIN_NUM_MISO,
@@ -155,8 +164,8 @@ void spi_master_init()
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                     // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-        .cs_ena_pretrans = 15,
-        .input_delay_ns = 25
+        .cs_ena_pretrans = 11,
+        .input_delay_ns = 1
     };
 
     // Inicializar el dispositivo SPI
@@ -179,12 +188,12 @@ void spi_test(void *pvParameters) {
     t.rx_buffer = buffer1;      
     t.flags = 0;               
 
-    for(int iter = 0; iter < 1000; iter++) {
+    for(int iter = 0; iter < 100; iter++) {
         // Realizar una única transacción
         esp_err_t ret = spi_device_polling_transmit(spi, &t);
 
         if (ret == ESP_OK) {
-            if(iter == 999) {  // Solo mostrar la última iteración
+            if(iter == 99) {  // Solo mostrar la última iteración
                 ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
                 for (int i = 0; i < BUF_SIZE; i = i+200) {
                     printf("%5d\n", buffer1[i]);
