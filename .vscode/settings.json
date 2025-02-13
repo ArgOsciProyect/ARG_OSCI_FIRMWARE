@@ -11,7 +11,8 @@
     "cjson.h": "c",
     "format": "c",
     "include.h": "c",
-    "string.h": "c"
+    "string.h": "c",
+    "stdio.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",

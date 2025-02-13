@@ -20,7 +20,7 @@ static atomic_int current_state = 0;
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
 {
-    return 1650000.0; // Hardcoded for now, will be calculated later
+    return 2500000; // Hardcoded for now, will be calculated later
 }
 
 static int dividing_factor(void)
@@ -221,11 +221,21 @@ void wifi_init()
 }
 
 #ifdef USE_EXTERNAL_ADC
-void spi_master_init(void)
+void spi_master_init()
 {
     esp_err_t ret;
     int freq;
 
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << PIN_NUM_MISO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    // Configurar el bus SPI
     spi_bus_config_t buscfg = {
         .miso_io_num = PIN_NUM_MISO,
         .mosi_io_num = -1,
@@ -234,23 +244,29 @@ void spi_master_init(void)
         .quadhd_io_num = -1,
         .max_transfer_sz = 2*BUF_SIZE,
         .flags = SPICOMMON_BUSFLAG_MASTER | 
-                SPICOMMON_BUSFLAG_MISO    
+                SPICOMMON_BUSFLAG_MISO |
+                SPICOMMON_BUSFLAG_IOMUX_PINS,
+        .intr_flags = ESP_INTR_FLAG_IRAM
     };
 
+    // Inicializar el bus SPI
     ret = spi_bus_initialize(HSPI_HOST, &buscfg, 3);
     ESP_ERROR_CHECK(ret);
 
+    // Configurar el dispositivo SPI
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 48 * 1000 * 1000,
-        .mode = 0,
-        .spics_io_num = PIN_NUM_CS,
-        .queue_size = 7,
-        .pre_cb = NULL,
-        .post_cb = NULL,
-        .flags = SPI_DEVICE_HALFDUPLEX,
-        .cs_ena_pretrans = 15,
-        .input_delay_ns = 25
+        .clock_speed_hz = 48 * 1000 * 1000, // Velocidad del reloj SPI (10 MHz)
+        .mode = 0,                          // Modo SPI 0
+        .spics_io_num = PIN_NUM_CS,         // Pin CS
+        .queue_size = 7,                    // Tamaño de la cola de transacciones
+        .pre_cb = NULL,                     // Callback antes de cada transacción
+        .post_cb = NULL,                     // Callback después de cada transacción
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
+        .cs_ena_pretrans = 11,
+        .input_delay_ns = 4
     };
+
+    // Inicializar el dispositivo SPI
 
     ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
     ESP_ERROR_CHECK(ret);
@@ -258,6 +274,7 @@ void spi_master_init(void)
     ESP_LOGI(TAG, "SPI Master initialized.");
     spi_device_get_actual_freq(spi, &freq);
     ESP_LOGI(TAG, "Actual frequency: %d", freq);
+
 }
 
 void init_mcpwm_trigger(void)
@@ -529,7 +546,7 @@ void socket_task(void *pvParameters)
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
-    uint8_t buffer[BUF_SIZE];
+    uint16_t buffer[BUF_SIZE];
     uint32_t len;
 
     #ifdef USE_EXTERNAL_ADC
@@ -563,10 +580,7 @@ void socket_task(void *pvParameters)
             ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
 
-        #ifdef USE_EXTERNAL_ADC
-        esp_err_t ret_qt = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(ret_qt);
-        #else
+        #ifndef USE_EXTERNAL_ADC
         start_adc_sampling();
         #endif
 
@@ -605,15 +619,12 @@ void socket_task(void *pvParameters)
                 #endif
             }
             #ifdef USE_EXTERNAL_ADC
-            spi_transaction_t *rtrans;
-            esp_err_t ret = spi_device_get_trans_result(spi, &rtrans, 1000 / portTICK_PERIOD_MS);
+            esp_err_t ret = spi_device_polling_transmit(spi, &t);
             if (ret == ESP_OK) {
                 len = BUF_SIZE;
             } else {
                 ESP_LOGE(TAG, "SPI transaction failed");
             }
-            ret_qt = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
-            ESP_ERROR_CHECK(ret_qt);
             #else
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             #endif
