@@ -15,7 +15,7 @@ static atomic_int mode = 0;
 static atomic_int last_state = 0;
 static atomic_int trigger_edge = 0;
 static atomic_int current_state = 0;
-#define GPIO_INPUT_PIN GPIO_NUM_13 // Reemplaza GPIO_NUM_4 con el pin que desees usar
+#define GPIO_INPUT_PIN GPIO_NUM_19 // Reemplaza GPIO_NUM_4 con el pin que desees usar
 
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
@@ -25,7 +25,7 @@ static double get_sampling_frequency(void)
 
 static int dividing_factor(void)
 {
-    return 6;
+    return 1;
 }
 
 static int get_bits_per_packet(void)
@@ -34,18 +34,30 @@ static int get_bits_per_packet(void)
 }
 
 static int get_data_mask(void)
-{
+{   
+    #ifdef USE_EXTERNAL_ADC
+    return 0x1FF8; // Mask for data bits
+    #else
     return 0x0FFF; // Mask for data bits
+    #endif
 }
 
 static int get_channel_mask(void)
-{
+{   
+    #ifdef USE_EXTERNAL_ADC
+    return 0x0; // Mask for channel bits
+    #else
     return 0x0F; // Mask for channel bits
+    #endif
 }
 
 static int get_useful_bits(void)
-{
+{   
+    #ifdef USE_EXTERNAL_ADC
+    return 10; // ADC resolution configured
+    #else
     return 9; // ADC resolution configured
+    #endif
 }
 
 static int get_samples_per_packet(void)
@@ -193,6 +205,114 @@ void wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
+#ifdef USE_EXTERNAL_ADC
+void spi_master_init(void)
+{
+    esp_err_t ret;
+    int freq;
+
+    spi_bus_config_t buscfg = {
+        .miso_io_num = PIN_NUM_MISO,
+        .mosi_io_num = -1,
+        .sclk_io_num = PIN_NUM_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 2*BUF_SIZE,
+        .flags = SPICOMMON_BUSFLAG_MASTER | 
+                SPICOMMON_BUSFLAG_MISO    
+    };
+
+    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 3);
+    ESP_ERROR_CHECK(ret);
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 48 * 1000 * 1000,
+        .mode = 0,
+        .spics_io_num = PIN_NUM_CS,
+        .queue_size = 7,
+        .pre_cb = NULL,
+        .post_cb = NULL,
+        .flags = SPI_DEVICE_HALFDUPLEX,
+        .cs_ena_pretrans = 15,
+        .input_delay_ns = 25
+    };
+
+    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "SPI Master initialized.");
+    spi_device_get_actual_freq(spi, &freq);
+    ESP_LOGI(TAG, "Actual frequency: %d", freq);
+}
+
+void init_mcpwm_trigger(void)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << SYNC_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    mcpwm_timer_config_t timer_config = {
+        .group_id = 0,
+        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = TRIGGER_PWM_FREQ_HZ * 32,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+        .period_ticks = 32,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
+
+    mcpwm_gpio_sync_src_config_t gpio_sync_config = {
+        .group_id = 0,
+        .gpio_num = SYNC_GPIO,
+        .flags.active_neg = 1,
+        .flags.io_loop_back = 0,
+        .flags.pull_down = 1,
+        .flags.pull_up = 0,
+    };
+    
+    mcpwm_sync_handle_t gpio_sync = NULL;
+    ESP_ERROR_CHECK(mcpwm_new_gpio_sync_src(&gpio_sync_config, &gpio_sync));
+
+    mcpwm_timer_sync_phase_config_t sync_phase = {
+        .sync_src = gpio_sync,
+        .count_value = 0,
+        .direction = MCPWM_TIMER_DIRECTION_UP
+    };
+    ESP_ERROR_CHECK(mcpwm_timer_set_phase_on_sync(timer, &sync_phase));
+
+    mcpwm_operator_config_t operator_config = {
+        .group_id = 0,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &oper));
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
+
+    mcpwm_comparator_config_t comparator_config = {
+        .flags.update_cmp_on_tez = true,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &comparator));
+
+    mcpwm_generator_config_t generator_config = {
+        .gen_gpio_num = TRIGGER_PWM_GPIO,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
+
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(generator,
+                    MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
+                    MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
+
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(26)));
+    ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
+    ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
+}
+#endif
+
+#ifndef USE_EXTERNAL_ADC
 void start_adc_sampling()
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
@@ -228,6 +348,7 @@ void stop_adc_sampling()
     ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
     ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
 }
+#endif
 
 static void generate_key_pair_task(void *pvParameters)
 {
@@ -396,6 +517,15 @@ void socket_task(void *pvParameters)
     uint8_t buffer[BUF_SIZE];
     uint32_t len;
 
+    #ifdef USE_EXTERNAL_ADC
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 0;
+    t.rxlength = BUF_SIZE * 16;
+    t.rx_buffer = buffer;
+    t.flags = 0;
+    #endif
+
     while (1)
     {
         if (new_sock == -1)
@@ -418,12 +548,18 @@ void socket_task(void *pvParameters)
             ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
 
+        #ifdef USE_EXTERNAL_ADC
+        esp_err_t ret_qt = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
+        ESP_ERROR_CHECK(ret_qt);
+        #else
         start_adc_sampling();
+        #endif
 
         while (1)
         {
             if (mode == 1)
             {
+                #ifndef USE_EXTERNAL_ADC
                 TickType_t xLastWakeTime = xTaskGetTickCount();
                 current_state = gpio_get_level(GPIO_INPUT_PIN);
 
@@ -451,8 +587,21 @@ void socket_task(void *pvParameters)
                 TickType_t xCurrentTime = xTaskGetTickCount();
                 vTaskDelay(pdMS_TO_TICKS(12) - (xCurrentTime - xLastWakeTime));
                 // esp_rom_delay_us(24824);
+                #endif
             }
+            #ifdef USE_EXTERNAL_ADC
+            spi_transaction_t *rtrans;
+            esp_err_t ret = spi_device_get_trans_result(spi, &rtrans, 1000 / portTICK_PERIOD_MS);
+            if (ret == ESP_OK) {
+                len = BUF_SIZE;
+            } else {
+                ESP_LOGE(TAG, "SPI transaction failed");
+            }
+            ret_qt = spi_device_queue_trans(spi, &t, 1000 / portTICK_PERIOD_MS);
+            ESP_ERROR_CHECK(ret_qt);
+            #else
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+            #endif
             if (ret == ESP_OK && len > 0)
             {
                 // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
@@ -506,13 +655,16 @@ void socket_task(void *pvParameters)
                 ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
                 if (read_miss_count >= 10)
                 {
-                    ESP_LOGE(TAG, "Critical ADC data loss detected.");
+                    ESP_LOGE(TAG, "Critical ADC or SPI data loss detected.");
                     read_miss_count = 0;
                 }
             }
         }
 
+        #ifndef USE_EXTERNAL_ADC
         stop_adc_sampling();
+        #endif
+
         safe_close(client_sock);
         ESP_LOGI(TAG, "Client disconnected");
     }
@@ -1448,7 +1600,13 @@ void app_main(void)
     // ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
+    
     init_trigger_pwm(); // Inicializar DAC para trigger
+
+    #ifdef USE_EXTERNAL_ADC
+    spi_master_init();
+    init_mcpwm_trigger();
+    #endif
 
     // Inicializar Wi-Fi
     wifi_init();

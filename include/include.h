@@ -26,6 +26,8 @@
 #include "driver/dac_cosine.h"
 #include "esp_adc/adc_continuous.h"
 #include "driver/adc.h"
+#include "driver/spi_master.h"
+#include "driver/mcpwm_prelude.h"
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -40,11 +42,25 @@
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
-#define BUF_SIZE 8192*5
+#define BUF_SIZE 8192*2
 #define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11
+#define PIN_NUM_MISO 12
+#define PIN_NUM_MOSI 13
+#define PIN_NUM_CLK  14
+#define PIN_NUM_CS   15
+#define TRIGGER_PWM_FREQ_HZ 2500000  // 2.5MHz
+#define TRIGGER_PWM_GPIO 16
+#define SYNC_GPIO 17  // Pin for synchronization
+
+#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 static adc_continuous_handle_t adc_handle;
 static int read_miss_count = 0;
+static spi_device_handle_t spi;
+static mcpwm_timer_handle_t timer = NULL;
+static mcpwm_oper_handle_t oper = NULL;
+static mcpwm_cmpr_handle_t comparator = NULL;
+static mcpwm_gen_handle_t generator = NULL;
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"
