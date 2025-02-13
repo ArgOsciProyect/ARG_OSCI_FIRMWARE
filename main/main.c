@@ -15,6 +15,7 @@
 #include <math.h>
 //#include "driver/mcpwm.h"
 #include "driver/mcpwm_prelude.h"
+#include "esp_task_wdt.h"
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE 2000000 // 2 MHz
 #define BUF_SIZE 2*8192
@@ -135,8 +136,10 @@ void spi_master_init()
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 2*BUF_SIZE,
-        .flags = SPICOMMON_BUSFLAG_MASTER | // Modo maestro
-                SPICOMMON_BUSFLAG_MISO    // Solo línea MISO
+        .flags = SPICOMMON_BUSFLAG_MASTER | 
+                SPICOMMON_BUSFLAG_MISO |
+                SPICOMMON_BUSFLAG_IOMUX_PINS,
+        .intr_flags = ESP_INTR_FLAG_IRAM
     };
 
     // Inicializar el bus SPI
@@ -151,7 +154,7 @@ void spi_master_init()
         .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                     // Callback después de cada transacción
-        .flags = SPI_DEVICE_HALFDUPLEX,    // Explícitamente half-duplex
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
         .cs_ena_pretrans = 15,
         .input_delay_ns = 25
     };
@@ -169,25 +172,19 @@ void spi_master_init()
 
 void spi_test(void *pvParameters) {
     uint16_t buffer1[BUF_SIZE];
-    spi_transaction_t t1;
-    memset(&t1, 0, sizeof(t1));
-    t1.length = 0;               
-    t1.rxlength = BUF_SIZE * 16; 
-    t1.rx_buffer = buffer1;      
-    t1.flags = 0;               
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 0;               
+    t.rxlength = BUF_SIZE * 16; 
+    t.rx_buffer = buffer1;      
+    t.flags = 0;               
 
-    for(int iter = 0; iter < 100; iter++) {
+    for(int iter = 0; iter < 1000; iter++) {
         // Realizar una única transacción
-        esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(ret1);
+        esp_err_t ret = spi_device_polling_transmit(spi, &t);
 
-        // Obtener el resultado
-        spi_transaction_t *rtrans1;
-        ret1 = spi_device_get_trans_result(spi, &rtrans1, 1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(ret1);
-
-        if (ret1 == ESP_OK) {
-            if(iter == 99) {  // Solo mostrar la última iteración
+        if (ret == ESP_OK) {
+            if(iter == 999) {  // Solo mostrar la última iteración
                 ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
                 for (int i = 0; i < BUF_SIZE; i = i+200) {
                     printf("%5d\n", buffer1[i]);
@@ -215,9 +212,12 @@ void app_main() {
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    ESP_ERROR_CHECK(esp_task_wdt_deinit());
+
     spi_master_init();
     init_trigger_pwm();
 
-    xTaskCreate(spi_test, "spi_test", BUF_SIZE *3, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(spi_test, "spi_test", BUF_SIZE *3, NULL, 5, NULL, 0);
 }
 
