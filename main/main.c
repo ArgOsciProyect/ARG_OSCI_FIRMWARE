@@ -65,6 +65,20 @@ static int get_samples_per_packet(void)
     return BUF_SIZE / 2; // Number of samples per send call
 }
 
+static int get_discard_head(void)
+{
+    #ifdef USE_EXTERNAL_ADC
+    return 3;
+    #else
+    return 0;
+    #endif
+}
+
+static int get_discard_trailer(void)
+{
+    return 0; 
+}
+
 static esp_err_t config_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Config handler called");
@@ -83,6 +97,8 @@ static esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "useful_bits", get_useful_bits());
     cJSON_AddNumberToObject(config, "samples_per_packet", get_samples_per_packet());
     cJSON_AddNumberToObject(config, "dividing_factor", dividing_factor());
+    cJSON_AddNumberToObject(config, "discard_head", get_discard_head());       // New field
+    cJSON_AddNumberToObject(config, "discard_trailer", get_discard_trailer()); // New field
 
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));
@@ -92,7 +108,6 @@ static esp_err_t config_handler(httpd_req_t *req)
 
     return ret;
 }
-
 static esp_err_t safe_close(int sock)
 {
     if (sock < 0)
