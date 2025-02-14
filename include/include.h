@@ -41,8 +41,8 @@
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
+#define ADC_BITWIDTH ADC_WIDTH_BIT_9
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
-#define BUF_SIZE 8192*2
 #define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11
 #define PIN_NUM_MISO 12
 #define PIN_NUM_MOSI 13
@@ -52,7 +52,13 @@
 #define TRIGGER_PWM_GPIO 16
 #define SYNC_GPIO 17  // Pin for synchronization
 
-#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+
+#ifdef USE_EXTERNAL_ADC
+#define BUF_SIZE 17280
+#else
+#define BUF_SIZE 17280*2
+#endif
 
 static adc_continuous_handle_t adc_handle;
 static int read_miss_count = 0;

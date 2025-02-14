@@ -55,7 +55,7 @@ static int get_channel_mask(void)
     #ifdef USE_EXTERNAL_ADC
     return 0x0; // Mask for channel bits
     #else
-    return 0x0F; // Mask for channel bits
+    return 0xF000; // Mask for channel bits
     #endif
 }
 
@@ -64,25 +64,17 @@ static int get_useful_bits(void)
     #ifdef USE_EXTERNAL_ADC
     return 10; // ADC resolution configured
     #else
-    return 9; // ADC resolution configured
+    return ADC_BITWIDTH; // ADC resolution configured
     #endif
 }
 
-static int get_samples_per_packet(void)
-{
-    #ifdef USE_EXTERNAL_ADC
-    return BUF_SIZE; // Number of samples per send call
-    #else
-    return BUF_SIZE / 2; // Number of samples per send call
-    #endif
-}
-
+//Descarta los primeros datos de la trama
 static int get_discard_head(void)
 {
     #ifdef USE_EXTERNAL_ADC
     return 0;
     #else
-    return 0;
+    return 6;
     #endif
 }
 
@@ -90,6 +82,20 @@ static int get_discard_trailer(void)
 {
     return 0; 
 }
+
+static int get_samples_per_packet(void)
+{
+    int total_samples;
+    #ifdef USE_EXTERNAL_ADC
+    total_samples = BUF_SIZE; // Number of samples per send call
+    #else
+    total_samples = BUF_SIZE / 2; // Number of samples per send call
+    #endif
+
+    return total_samples - get_discard_head() - get_discard_trailer();
+}
+
+
 
 static esp_err_t config_handler(httpd_req_t *req)
 {
@@ -364,7 +370,7 @@ void start_adc_sampling()
     adc_digi_pattern_config_t adc_pattern = {
         .atten = ADC_ATTEN_DB_12,
         .channel = ADC_CHANNEL,
-        .bit_width = ADC_BITWIDTH_9};
+        .bit_width = ADC_BITWIDTH};
 
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
@@ -600,6 +606,7 @@ void socket_task(void *pvParameters)
         start_adc_sampling();
         #endif
 
+
         while (1)
         {
             if (mode == 1)
@@ -639,49 +646,33 @@ void socket_task(void *pvParameters)
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "SPI transaction failed");
             }
+            len = BUF_SIZE * 2;  // Each sample is 2 bytes
             #else
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             #endif
+
             if (ret == ESP_OK && len > 0)
             {
-                // for (int i = 0; i < len; i += sizeof(adc_digi_output_data_t)) {
-                //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                //     uint16_t adc_value = adc_data->type1.data;
-                //     ESP_LOGI(TAG, "ADC Reading: %d", adc_value);
-                //     vTaskDelay(1 / portTICK_PERIOD_MS);
-                // }
                 if (mode == 1)
                 {
                     mode = 0;
-                    // ESP_LOGI(TAG, "len: %ld", len);
-                    //// Track total samples for end calculation
-                    // int total_samples = len / sizeof(adc_digi_output_data_t);
-                    // int current_pos = 0;
-                    // for (int i = 0; i < len - 1; i += sizeof(adc_digi_output_data_t))
-                    //{
-                    //     adc_digi_output_data_t *adc_data = (adc_digi_output_data_t *)&buffer[i];
-                    //     uint16_t adc_value = adc_data->val;
-                    //     current_pos++;
-                    //
-                    //    // Print first 10 values
-                    //    if (current_pos <= 10)
-                    //    {
-                    //        ESP_LOGI(TAG, "First Values [%d]: 0x%X", current_pos, adc_value);
-                    //    }
-                    //    // Print last 10 values
-                    //    else if (current_pos > (total_samples - 10))
-                    //    {
-                    //        ESP_LOGI(TAG, "Last Values [%d]: 0x%X", current_pos, adc_value);
-                    //    }
-                    //}
                 }
+
+                // Calculate actual data to send
+                size_t sample_size = sizeof(uint16_t);
+                #ifndef USE_EXTERNAL_ADC
+                sample_size = sizeof(uint8_t);
+                #endif
+
+                void *send_buffer = buffer + (get_discard_head() * sample_size);
+                size_t send_len = get_samples_per_packet() * sample_size;
+
                 int flags = MSG_MORE;
-                ssize_t sent = send(client_sock, buffer, len, flags);
+                ssize_t sent = send(client_sock, send_buffer, send_len, flags);
                 if (sent < 0)
                 {
                     if (errno == EAGAIN || errno == EWOULDBLOCK)
                     {
-                        // Buffer lleno, esperar
                         vTaskDelay(pdMS_TO_TICKS(10));
                         continue;
                     }
