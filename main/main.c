@@ -20,12 +20,20 @@ static atomic_int current_state = 0;
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
 {
-    return 2500000; // Hardcoded for now, will be calculated later
+    #ifdef USE_EXTERNAL_ADC
+    return 2500000;
+    #else
+    return 1650000; // Hardcoded for now, will be calculated later
+    #endif
 }
 
 static int dividing_factor(void)
 {
+    #ifdef USE_EXTERNAL_ADC
     return 1;
+    #else
+    return 6;
+    #endif
 }
 
 static int get_bits_per_packet(void)
@@ -62,13 +70,17 @@ static int get_useful_bits(void)
 
 static int get_samples_per_packet(void)
 {
+    #ifdef USE_EXTERNAL_ADC
+    return BUF_SIZE; // Number of samples per send call
+    #else
     return BUF_SIZE / 2; // Number of samples per send call
+    #endif
 }
 
 static int get_discard_head(void)
 {
     #ifdef USE_EXTERNAL_ADC
-    return 3;
+    return 0;
     #else
     return 0;
     #endif
@@ -546,16 +558,20 @@ void socket_task(void *pvParameters)
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
-    uint16_t buffer[BUF_SIZE];
+    
     uint32_t len;
 
     #ifdef USE_EXTERNAL_ADC
+    uint16_t buffer[BUF_SIZE];
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = 0;
     t.rxlength = BUF_SIZE * 16;
     t.rx_buffer = buffer;
     t.flags = 0;
+    len = BUF_SIZE * 2;
+    #else
+    uint8_t buffer[BUF_SIZE];
     #endif
 
     while (1)
@@ -620,9 +636,7 @@ void socket_task(void *pvParameters)
             }
             #ifdef USE_EXTERNAL_ADC
             esp_err_t ret = spi_device_polling_transmit(spi, &t);
-            if (ret == ESP_OK) {
-                len = BUF_SIZE;
-            } else {
+            if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "SPI transaction failed");
             }
             #else
