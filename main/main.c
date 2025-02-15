@@ -1650,5 +1650,5 @@ void app_main(void)
     configure_gpio();
 
     // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 50000, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
 }

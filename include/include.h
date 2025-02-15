@@ -57,7 +57,7 @@
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 17280
 #else
-#define BUF_SIZE 17280*2
+#define BUF_SIZE 17280*3
 #endif
 
 static adc_continuous_handle_t adc_handle;
