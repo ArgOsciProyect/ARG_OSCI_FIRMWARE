@@ -580,6 +580,18 @@ void socket_task(void *pvParameters)
     uint8_t buffer[BUF_SIZE];
     #endif
 
+    // Calculate actual data to send
+    #ifdef USE_EXTERNAL_ADC
+    size_t sample_size = sizeof(uint16_t);
+    #else
+    size_t sample_size = sizeof(uint8_t);
+    #endif
+
+    void *send_buffer = buffer + (get_discard_head() * sample_size);
+    size_t send_len = get_samples_per_packet() * sample_size;
+
+    int flags = MSG_MORE;
+
     while (1)
     {
         if (new_sock == -1)
@@ -611,7 +623,52 @@ void socket_task(void *pvParameters)
         {
             if (mode == 1)
             {
-                #ifndef USE_EXTERNAL_ADC
+                #ifdef USE_EXTERNAL_ADC
+                // bool edge_detected = 0;
+                // esp_err_t ret = spi_device_polling_start(spi, &t, 1000/portTICK_PERIOD_MS);
+                // if (ret != ESP_OK) {
+                //     ESP_LOGE(TAG, "SPI transaction failed");
+                // }
+                // TickType_t xLastWakeTime = xTaskGetTickCount();
+                // TickType_t xCurrentTime = xTaskGetTickCount();
+                // while(pdMS_TO_TICKS(11) > (xCurrentTime - xLastWakeTime)){
+                //     current_state = gpio_get_level(GPIO_INPUT_PIN);
+                //     edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
+                //                             (current_state < last_state);                    // Negative edge
+
+                //     last_state = current_state;
+                //     xCurrentTime = xTaskGetTickCount();
+                //     if (!edge_detected)
+                //     {
+                //         continue;
+                //     }
+                //     break;
+                // }
+                // ret = spi_device_polling_end(spi, &t);
+                // if (ret != ESP_OK) {
+                //     ESP_LOGE(TAG, "SPI transaction failed");
+                // }
+                // if (!edge_detected)
+                // {
+                //     continue;
+                // }
+                // if (ret == ESP_OK && len > 0)
+                // {
+                // // Prepare data for sending
+                //     ssize_t sent = send(client_sock, send_buffer, send_len, flags);
+                //     if (sent < 0)
+                //     {
+                //         if (errno == EAGAIN || errno == EWOULDBLOCK)
+                //         {
+                //             vTaskDelay(pdMS_TO_TICKS(10));
+                //             continue;
+                //         }
+                //         ESP_LOGE(TAG, "Send error: errno %d", errno);
+                //         break;
+                //     }
+                // }
+                // continue;
+                #else
                 TickType_t xLastWakeTime = xTaskGetTickCount();
                 current_state = gpio_get_level(GPIO_INPUT_PIN);
 
@@ -626,13 +683,12 @@ void socket_task(void *pvParameters)
 
                 // TODO Ver si usar un valor diferente de delay para positivo o negativo
                 // TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
-
+                last_state = current_state;
+                
                 if (!edge_detected)
                 {
-                    last_state = current_state; // Update state only if no edge detected
                     continue;
                 }
-                last_state = current_state; // Update state after edge detection
 
                 // If we get here, edge was detected
 
@@ -646,28 +702,15 @@ void socket_task(void *pvParameters)
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "SPI transaction failed");
             }
-            len = BUF_SIZE * 2;  // Each sample is 2 bytes
+
             #else
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
             #endif
 
             if (ret == ESP_OK && len > 0)
             {
-                if (mode == 1)
-                {
-                    mode = 0;
-                }
 
-                // Calculate actual data to send
-                size_t sample_size = sizeof(uint16_t);
-                #ifndef USE_EXTERNAL_ADC
-                sample_size = sizeof(uint8_t);
-                #endif
-
-                void *send_buffer = buffer + (get_discard_head() * sample_size);
-                size_t send_len = get_samples_per_packet() * sample_size;
-
-                int flags = MSG_MORE;
+                // Prepare data for sending
                 ssize_t sent = send(client_sock, send_buffer, send_len, flags);
                 if (sent < 0)
                 {
