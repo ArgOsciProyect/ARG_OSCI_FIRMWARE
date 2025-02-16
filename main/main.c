@@ -17,7 +17,7 @@
 #include "driver/mcpwm_prelude.h"
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define SAMPLE_RATE 2000000 // 2 MHz
-#define BUF_SIZE 2*8192
+#define BUF_SIZE 25920
 #define PIN_NUM_MISO 12
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
@@ -184,13 +184,13 @@ void spi_test(void *pvParameters) {
     uint32_t sum;
     const int duration_ms = 10000;  // Duración total de ejecución en milisegundos (10 segundos)
     TickType_t start_time;
-
+    esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
+        ESP_ERROR_CHECK(ret1);
     while (1) {
         sum = 0;
         start_time = xTaskGetTickCount(); // Marca el tiempo de inicio
         // Poner en cola la transacción
-        esp_err_t ret1 = spi_device_queue_trans(spi, &t1, 1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(ret1);
+        
         // esp_err_t ret2 = spi_device_queue_trans(spi, &t2, 1000 / portTICK_PERIOD_MS);
         // ESP_ERROR_CHECK(ret2);
 
@@ -198,6 +198,7 @@ void spi_test(void *pvParameters) {
              
              // Obtener el resultado de la transacción
              spi_transaction_t *rtrans1;
+             memset(&rtrans1, 0, sizeof(rtrans1)); // Clear the transaction structure
              ret1 = spi_device_get_trans_result(spi, &rtrans1, 1000 / portTICK_PERIOD_MS);
              ESP_ERROR_CHECK(ret1);
 
