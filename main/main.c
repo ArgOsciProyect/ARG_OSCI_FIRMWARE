@@ -74,7 +74,7 @@ static int get_discard_head(void)
     #ifdef USE_EXTERNAL_ADC
     return 0;
     #else
-    return 6;
+    return 0;
     #endif
 }
 
@@ -89,7 +89,7 @@ static int get_samples_per_packet(void)
     #ifdef USE_EXTERNAL_ADC
     total_samples = BUF_SIZE; // Number of samples per send call
     #else
-    total_samples = BUF_SIZE / 2; // Number of samples per send call
+    total_samples = BUF_SIZE; // Number of samples per send call
     #endif
 
     return total_samples - get_discard_head() - get_discard_trailer();
@@ -625,7 +625,7 @@ void socket_task(void *pvParameters)
             {
                 #ifdef USE_EXTERNAL_ADC
                 // bool edge_detected = 0;
-                // esp_err_t ret = spi_device_polling_start(spi, &t, 1000/portTICK_PERIOD_MS);
+                // esp_err_t ret = spi_device_polling_start(spi, &t, portMAX_DELAY);
                 // if (ret != ESP_OK) {
                 //     ESP_LOGE(TAG, "SPI transaction failed");
                 // }
