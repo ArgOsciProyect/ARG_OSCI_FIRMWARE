@@ -280,8 +280,8 @@ void spi_master_init()
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                     // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-        .cs_ena_pretrans = 11,
-        .input_delay_ns = 4
+        .cs_ena_pretrans = 10,
+        .input_delay_ns = 33
     };
 
     // Inicializar el dispositivo SPI
