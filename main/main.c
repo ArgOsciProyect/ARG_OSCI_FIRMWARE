@@ -164,8 +164,8 @@ void spi_master_init()
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                     // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-        .cs_ena_pretrans = 11,
-        .input_delay_ns = 1
+        .cs_ena_pretrans = 10,
+        .input_delay_ns = 33
     };
 
     // Inicializar el dispositivo SPI
@@ -180,6 +180,7 @@ void spi_master_init()
 }
 
 void spi_test(void *pvParameters) {
+    ESP_LOGI(TAG, "SPI task started");  // Log al inicio de la tarea
     uint16_t buffer1[BUF_SIZE];
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
@@ -188,21 +189,21 @@ void spi_test(void *pvParameters) {
     t.rx_buffer = buffer1;      
     t.flags = 0;               
 
-    while(1) {
+    for(int16_t iter = 0; iter<100; iter++) {
         // Realizar una única transacción
         esp_err_t ret = spi_device_polling_transmit(spi, &t);
 
-        // if (ret == ESP_OK) {
-        //     if(iter == 99) {  // Solo mostrar la última iteración
-        //         ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
-        //         for (int i = 0; i < BUF_SIZE; i = i+200) {
-        //             printf("%5d\n", buffer1[i]);
-        //         }
-        //     }
-        // } else {
-        //     ESP_LOGE(TAG, "Error en la lectura SPI en iteración %d", iter + 1);
-        //     break;
-        // }
+        if (ret == ESP_OK) {
+            if(iter == 99) {  // Solo mostrar la última iteración
+                ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
+                for (int i = 0; i < BUF_SIZE; i = i+200) {
+                    printf("%5d\n", buffer1[i]);
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "Error en la lectura SPI en iteración %d", iter + 1);
+            break;
+        }
     }
 
     // La tarea ha terminado
