@@ -1542,6 +1542,29 @@ static esp_err_t test_connect_handler(httpd_req_t *req)
 {
     return httpd_resp_send(req, "1", 1);
 }
+void print_memory_stats(void)
+{
+    ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Minimum free heap: %lu bytes", esp_get_minimum_free_heap_size());
+    ESP_LOGI(TAG, "Largest free block: %u bytes", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    
+    multi_heap_info_t info;
+    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "Total allocated: %u bytes", info.total_allocated_bytes);
+    ESP_LOGI(TAG, "Total free: %u bytes", info.total_free_bytes);
+    ESP_LOGI(TAG, "Total blocks: %u", info.total_blocks);
+    ESP_LOGI(TAG, "Free blocks: %u", info.free_blocks);
+}
+void memory_monitor_task(void *pvParameters)
+{
+    const TickType_t xDelay = pdMS_TO_TICKS(10000); // 10 seconds
+
+    while(1) {
+        print_memory_stats();
+        vTaskDelay(xDelay);
+    }
+}
+
 
 httpd_handle_t start_webserver(void)
 {
@@ -1691,7 +1714,10 @@ void app_main(void)
     // Iniciar el temporizador
     // my_timer_init();
     configure_gpio();
+    
 
     // Crear la tarea para manejar el socket en el núcleo 1
+    xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
+
     xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
 }

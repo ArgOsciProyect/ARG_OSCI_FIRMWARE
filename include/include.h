@@ -52,7 +52,7 @@
 #define TRIGGER_PWM_GPIO 16
 #define SYNC_GPIO 17  // Pin for synchronization
 
-#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 25920
