@@ -189,21 +189,22 @@ void spi_test(void *pvParameters) {
     t.rx_buffer = buffer1;      
     t.flags = 0;               
 
-    for(int16_t iter = 0; iter<100; iter++) {
+    while(1){
+    // for(int16_t iter = 0; iter<100; iter++) {
         // Realizar una única transacción
         esp_err_t ret = spi_device_polling_transmit(spi, &t);
 
-        if (ret == ESP_OK) {
-            if(iter == 99) {  // Solo mostrar la última iteración
-                ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
-                for (int i = 0; i < BUF_SIZE; i = i+200) {
-                    printf("%5d\n", buffer1[i]);
-                }
-            }
-        } else {
-            ESP_LOGE(TAG, "Error en la lectura SPI en iteración %d", iter + 1);
-            break;
-        }
+        // if (ret == ESP_OK) {
+        //     if(iter == 99) {  // Solo mostrar la última iteración
+        //         ESP_LOGI(TAG, "Datos recibidos en la iteración 100:");
+        //         for (int i = 0; i < BUF_SIZE; i = i+200) {
+        //             printf("%5d\n", buffer1[i]);
+        //         }
+        //     }
+        // } else {
+        //     ESP_LOGE(TAG, "Error en la lectura SPI en iteración %d", iter + 1);
+        //     break;
+        // }
     }
 
     // La tarea ha terminado
