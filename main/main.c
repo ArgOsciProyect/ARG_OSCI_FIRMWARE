@@ -20,20 +20,20 @@ static atomic_int current_state = 0;
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
 {
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     return 2500000;
-    #else
+#else
     return 1650000; // Hardcoded for now, will be calculated later
-    #endif
+#endif
 }
 
 static int dividing_factor(void)
 {
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     return 1;
-    #else
+#else
     return 6;
-    #endif
+#endif
 }
 
 static int get_bits_per_packet(void)
@@ -42,60 +42,58 @@ static int get_bits_per_packet(void)
 }
 
 static int get_data_mask(void)
-{   
-    #ifdef USE_EXTERNAL_ADC
+{
+#ifdef USE_EXTERNAL_ADC
     return 0x1FF8; // Mask for data bits
-    #else
+#else
     return 0x0FFF; // Mask for data bits
-    #endif
+#endif
 }
 
 static int get_channel_mask(void)
-{   
-    #ifdef USE_EXTERNAL_ADC
+{
+#ifdef USE_EXTERNAL_ADC
     return 0x0; // Mask for channel bits
-    #else
+#else
     return 0xF000; // Mask for channel bits
-    #endif
+#endif
 }
 
 static int get_useful_bits(void)
-{   
-    #ifdef USE_EXTERNAL_ADC
+{
+#ifdef USE_EXTERNAL_ADC
     return 10; // ADC resolution configured
-    #else
+#else
     return ADC_BITWIDTH; // ADC resolution configured
-    #endif
+#endif
 }
 
-//Descarta los primeros datos de la trama
+// Descarta los primeros datos de la trama
 static int get_discard_head(void)
 {
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     return 0;
-    #else
+#else
     return 0;
-    #endif
+#endif
 }
 
 static int get_discard_trailer(void)
 {
-    return 0; 
+    return 0;
 }
 
 static int get_samples_per_packet(void)
 {
     int total_samples;
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     total_samples = BUF_SIZE; // Number of samples per send call
-    #else
+#else
     total_samples = BUF_SIZE; // Number of samples per send call
-    #endif
+#endif
 
     return total_samples - get_discard_head() - get_discard_trailer();
 }
-
-
 
 static esp_err_t config_handler(httpd_req_t *req)
 {
@@ -249,8 +247,7 @@ void spi_master_init()
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+        .intr_type = GPIO_INTR_DISABLE};
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     // Configurar el bus SPI
@@ -260,12 +257,11 @@ void spi_master_init()
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 2*BUF_SIZE,
-        .flags = SPICOMMON_BUSFLAG_MASTER | 
-                SPICOMMON_BUSFLAG_MISO |
-                SPICOMMON_BUSFLAG_IOMUX_PINS,
-        .intr_flags = ESP_INTR_FLAG_IRAM
-    };
+        .max_transfer_sz = 2 * BUF_SIZE,
+        .flags = SPICOMMON_BUSFLAG_MASTER |
+                 SPICOMMON_BUSFLAG_MISO |
+                 SPICOMMON_BUSFLAG_IOMUX_PINS,
+        .intr_flags = ESP_INTR_FLAG_IRAM};
 
     // Inicializar el bus SPI
     ret = spi_bus_initialize(HSPI_HOST, &buscfg, 3);
@@ -278,11 +274,10 @@ void spi_master_init()
         .spics_io_num = PIN_NUM_CS,         // Pin CS
         .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
-        .post_cb = NULL,                     // Callback después de cada transacción
+        .post_cb = NULL,                    // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
         .cs_ena_pretrans = 10,
-        .input_delay_ns = 33
-    };
+        .input_delay_ns = 33};
 
     // Inicializar el dispositivo SPI
 
@@ -292,7 +287,6 @@ void spi_master_init()
     ESP_LOGI(TAG, "SPI Master initialized.");
     spi_device_get_actual_freq(spi, &freq);
     ESP_LOGI(TAG, "Actual frequency: %d", freq);
-
 }
 
 void init_mcpwm_trigger(void)
@@ -302,8 +296,7 @@ void init_mcpwm_trigger(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+        .intr_type = GPIO_INTR_DISABLE};
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     mcpwm_timer_config_t timer_config = {
@@ -323,15 +316,14 @@ void init_mcpwm_trigger(void)
         .flags.pull_down = 1,
         .flags.pull_up = 0,
     };
-    
+
     mcpwm_sync_handle_t gpio_sync = NULL;
     ESP_ERROR_CHECK(mcpwm_new_gpio_sync_src(&gpio_sync_config, &gpio_sync));
 
     mcpwm_timer_sync_phase_config_t sync_phase = {
         .sync_src = gpio_sync,
         .count_value = 0,
-        .direction = MCPWM_TIMER_DIRECTION_UP
-    };
+        .direction = MCPWM_TIMER_DIRECTION_UP};
     ESP_ERROR_CHECK(mcpwm_timer_set_phase_on_sync(timer, &sync_phase));
 
     mcpwm_operator_config_t operator_config = {
@@ -351,9 +343,9 @@ void init_mcpwm_trigger(void)
     ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
 
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(generator,
-                    MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+                                                              MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
-                    MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
+                                                                MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
 
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(26)));
     ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
@@ -564,10 +556,10 @@ void socket_task(void *pvParameters)
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
-    
+
     uint32_t len;
 
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     uint16_t buffer[BUF_SIZE];
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
@@ -576,16 +568,16 @@ void socket_task(void *pvParameters)
     t.rx_buffer = buffer;
     t.flags = 0;
     len = BUF_SIZE * 2;
-    #else
+#else
     uint8_t buffer[BUF_SIZE];
-    #endif
+#endif
 
-    // Calculate actual data to send
-    #ifdef USE_EXTERNAL_ADC
+// Calculate actual data to send
+#ifdef USE_EXTERNAL_ADC
     size_t sample_size = sizeof(uint16_t);
-    #else
+#else
     size_t sample_size = sizeof(uint8_t);
-    #endif
+#endif
 
     void *send_buffer = buffer + (get_discard_head() * sample_size);
     size_t send_len = get_samples_per_packet() * sample_size;
@@ -614,61 +606,60 @@ void socket_task(void *pvParameters)
             ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
 
-        #ifndef USE_EXTERNAL_ADC
+#ifndef USE_EXTERNAL_ADC
         start_adc_sampling();
-        #endif
-
+#endif
 
         while (1)
         {
             if (mode == 1)
             {
-                #ifdef USE_EXTERNAL_ADC
-                // bool edge_detected = 0;
-                // esp_err_t ret = spi_device_polling_start(spi, &t, portMAX_DELAY);
-                // if (ret != ESP_OK) {
-                //     ESP_LOGE(TAG, "SPI transaction failed");
-                // }
-                // TickType_t xLastWakeTime = xTaskGetTickCount();
-                // TickType_t xCurrentTime = xTaskGetTickCount();
-                // while(pdMS_TO_TICKS(11) > (xCurrentTime - xLastWakeTime)){
-                //     current_state = gpio_get_level(GPIO_INPUT_PIN);
-                //     edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
-                //                             (current_state < last_state);                    // Negative edge
+#ifdef USE_EXTERNAL_ADC
+// bool edge_detected = 0;
+// esp_err_t ret = spi_device_polling_start(spi, &t, portMAX_DELAY);
+// if (ret != ESP_OK) {
+//     ESP_LOGE(TAG, "SPI transaction failed");
+// }
+// TickType_t xLastWakeTime = xTaskGetTickCount();
+// TickType_t xCurrentTime = xTaskGetTickCount();
+// while(pdMS_TO_TICKS(11) > (xCurrentTime - xLastWakeTime)){
+//     current_state = gpio_get_level(GPIO_INPUT_PIN);
+//     edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
+//                             (current_state < last_state);                    // Negative edge
 
-                //     last_state = current_state;
-                //     xCurrentTime = xTaskGetTickCount();
-                //     if (!edge_detected)
-                //     {
-                //         continue;
-                //     }
-                //     break;
-                // }
-                // ret = spi_device_polling_end(spi, &t);
-                // if (ret != ESP_OK) {
-                //     ESP_LOGE(TAG, "SPI transaction failed");
-                // }
-                // if (!edge_detected)
-                // {
-                //     continue;
-                // }
-                // if (ret == ESP_OK && len > 0)
-                // {
-                // // Prepare data for sending
-                //     ssize_t sent = send(client_sock, send_buffer, send_len, flags);
-                //     if (sent < 0)
-                //     {
-                //         if (errno == EAGAIN || errno == EWOULDBLOCK)
-                //         {
-                //             vTaskDelay(pdMS_TO_TICKS(10));
-                //             continue;
-                //         }
-                //         ESP_LOGE(TAG, "Send error: errno %d", errno);
-                //         break;
-                //     }
-                // }
-                // continue;
-                #else
+//     last_state = current_state;
+//     xCurrentTime = xTaskGetTickCount();
+//     if (!edge_detected)
+//     {
+//         continue;
+//     }
+//     break;
+// }
+// ret = spi_device_polling_end(spi, &t);
+// if (ret != ESP_OK) {
+//     ESP_LOGE(TAG, "SPI transaction failed");
+// }
+// if (!edge_detected)
+// {
+//     continue;
+// }
+// if (ret == ESP_OK && len > 0)
+// {
+// // Prepare data for sending
+//     ssize_t sent = send(client_sock, send_buffer, send_len, flags);
+//     if (sent < 0)
+//     {
+//         if (errno == EAGAIN || errno == EWOULDBLOCK)
+//         {
+//             vTaskDelay(pdMS_TO_TICKS(10));
+//             continue;
+//         }
+//         ESP_LOGE(TAG, "Send error: errno %d", errno);
+//         break;
+//     }
+// }
+// continue;
+#else
                 TickType_t xLastWakeTime = xTaskGetTickCount();
                 current_state = gpio_get_level(GPIO_INPUT_PIN);
 
@@ -684,7 +675,7 @@ void socket_task(void *pvParameters)
                 // TODO Ver si usar un valor diferente de delay para positivo o negativo
                 // TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
                 last_state = current_state;
-                
+
                 if (!edge_detected)
                 {
                     continue;
@@ -694,18 +685,19 @@ void socket_task(void *pvParameters)
 
                 TickType_t xCurrentTime = xTaskGetTickCount();
                 vTaskDelay(pdMS_TO_TICKS(12) - (xCurrentTime - xLastWakeTime));
-                // esp_rom_delay_us(24824);
-                #endif
+// esp_rom_delay_us(24824);
+#endif
             }
-            #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
             esp_err_t ret = spi_device_polling_transmit(spi, &t);
-            if (ret != ESP_OK) {
+            if (ret != ESP_OK)
+            {
                 ESP_LOGE(TAG, "SPI transaction failed");
             }
 
-            #else
+#else
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-            #endif
+#endif
 
             if (ret == ESP_OK && len > 0)
             {
@@ -735,9 +727,9 @@ void socket_task(void *pvParameters)
             }
         }
 
-        #ifndef USE_EXTERNAL_ADC
+#ifndef USE_EXTERNAL_ADC
         stop_adc_sampling();
-        #endif
+#endif
 
         safe_close(client_sock);
         ESP_LOGI(TAG, "Client disconnected");
@@ -1038,6 +1030,7 @@ static esp_err_t trigger_handler(httpd_req_t *req)
 
     return ESP_OK;
 }
+
 static esp_err_t single_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Single handler called");
@@ -1053,45 +1046,96 @@ static esp_err_t single_handler(httpd_req_t *req)
     return httpd_resp_send(req, response, strlen(response));
 }
 
+static esp_err_t freq_handler(httpd_req_t *req)
+{
+    char content[100];
+    int received = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (received <= 0)
+    {
+        return httpd_resp_send_408(req);
+    }
+    content[received] = '\0';
+
+    cJSON *root = cJSON_Parse(content);
+    if (!root)
+    {
+        return httpd_resp_send_500(req);
+    }
+
+    // Por ahora no hacemos nada con "action"
+    cJSON *action = cJSON_GetObjectItem(root, "action");
+    if (!cJSON_IsString(action))
+    {
+        cJSON_Delete(root);
+        return httpd_resp_send_500(req);
+    }
+
+    // Construir respuesta
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddNumberToObject(response, "sampling_frequency", get_sampling_frequency());
+
+    const char *json_response = cJSON_Print(response);
+    httpd_resp_send(req, json_response, strlen(json_response));
+
+    ESP_LOGI(TAG, "Frequency handler called, action: %s", action->valuestring);
+
+    free((void *)json_response);
+    cJSON_Delete(response);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
+
 static esp_err_t reset_socket_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Reset socket handler called");
-    
+
     // Get appropriate IP info based on request source port
     esp_netif_ip_info_t ip_info;
-    if (httpd_req_get_hdr_value_len(req, "Host") > 0) {
+    if (httpd_req_get_hdr_value_len(req, "Host") > 0)
+    {
         char host[32];
         httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
         // Check if request came from AP server (port 81)
         bool is_ap_server = (strstr(host, ":81") != NULL);
-        
-        if (is_ap_server) {
-            if (get_ap_ip_info(&ip_info) != ESP_OK) {
-                httpd_resp_send_500(req);
-                return ESP_FAIL;
-            }
-        } else {
-            if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK) {
+
+        if (is_ap_server)
+        {
+            if (get_ap_ip_info(&ip_info) != ESP_OK)
+            {
                 httpd_resp_send_500(req);
                 return ESP_FAIL;
             }
         }
-    } else {
+        else
+        {
+            if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK)
+            {
+                httpd_resp_send_500(req);
+                return ESP_FAIL;
+            }
+        }
+    }
+    else
+    {
         // Fallback to AP mode if can't determine source
-        if (get_ap_ip_info(&ip_info) != ESP_OK) {
+        if (get_ap_ip_info(&ip_info) != ESP_OK)
+        {
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
     }
 
     // Close existing socket if any
-    if (new_sock != -1) {
+    if (new_sock != -1)
+    {
         safe_close(new_sock);
         new_sock = -1;
     }
 
     // Create and bind new socket
-    if (create_socket_and_bind(&ip_info) != ESP_OK) {
+    if (create_socket_and_bind(&ip_info) != ESP_OK)
+    {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -1100,7 +1144,8 @@ static esp_err_t reset_socket_handler(httpd_req_t *req)
     char ip_str[16];
     struct sockaddr_in new_addr;
     socklen_t new_addr_len = sizeof(new_addr);
-    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0) {
+    if (getsockname(new_sock, (struct sockaddr *)&new_addr, &new_addr_len) != 0)
+    {
         ESP_LOGE(TAG, "Unable to get socket name: errno %d", errno);
         safe_close(new_sock);
         new_sock = -1;
@@ -1140,7 +1185,7 @@ httpd_handle_t start_second_webserver(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.core_id = 0; // Run on core 0
     config.server_port = 80;
-    config.max_uri_handlers = 9;    // Increase from default 8 to accommodate all handlers
+    config.max_uri_handlers = 10;   // Increase from default 8 to accommodate all handlers
     config.max_resp_headers = 8;    // Increase if needed
     config.lru_purge_enable = true; // Enable LRU mechanism
     config.stack_size = 4096 * 1.5;
@@ -1187,6 +1232,13 @@ httpd_handle_t start_second_webserver(void)
             .handler = normal_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &normal_uri);
+
+        httpd_uri_t freq_uri = {
+            .uri = "/freq",
+            .method = HTTP_POST,
+            .handler = freq_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(second_server, &freq_uri);
     }
 
     return second_server;
@@ -1292,17 +1344,16 @@ static esp_err_t create_socket_and_bind(esp_netif_ip_info_t *ip_info)
     return ESP_OK;
 }
 
-
-
-static esp_err_t send_wifi_response(httpd_req_t *req, const char *ip, int port, bool success) {
+static esp_err_t send_wifi_response(httpd_req_t *req, const char *ip, int port, bool success)
+{
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "IP", ip ? ip : "");
     cJSON_AddNumberToObject(response, "Port", port);
     cJSON_AddStringToObject(response, "Success", success ? "true" : "false");
-    
+
     const char *json_response = cJSON_Print(response);
     esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
-    
+
     cJSON_Delete(response);
     free((void *)json_response);
     return ret;
@@ -1369,8 +1420,9 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
     int new_port = ntohs(new_addr.sin_port);
 
     esp_err_t ret = send_wifi_response(req, ip_str, new_port, true);
-    
-    if (ret == ESP_OK) {
+
+    if (ret == ESP_OK)
+    {
         second_server = start_second_webserver();
     }
 
@@ -1547,7 +1599,7 @@ void print_memory_stats(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Minimum free heap: %lu bytes", esp_get_minimum_free_heap_size());
     ESP_LOGI(TAG, "Largest free block: %u bytes", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    
+
     multi_heap_info_t info;
     heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "Total allocated: %u bytes", info.total_allocated_bytes);
@@ -1559,12 +1611,12 @@ void memory_monitor_task(void *pvParameters)
 {
     const TickType_t xDelay = pdMS_TO_TICKS(10000); // 10 seconds
 
-    while(1) {
+    while (1)
+    {
         print_memory_stats();
         vTaskDelay(xDelay);
     }
 }
-
 
 httpd_handle_t start_webserver(void)
 {
@@ -1573,7 +1625,7 @@ httpd_handle_t start_webserver(void)
     config.server_port = 81;
     config.ctrl_port = 32767;
     config.stack_size = 4096 * 4;
-    config.max_uri_handlers = 10;    // Increase from default 8 to accommodate all handlers
+    config.max_uri_handlers = 11;   // Increase from default 8 to accommodate all handlers
     config.max_resp_headers = 8;    // Increase if needed
     config.lru_purge_enable = true; // Enable LRU mechanism
 
@@ -1651,6 +1703,13 @@ httpd_handle_t start_webserver(void)
             .handler = normal_handler,
             .user_ctx = NULL};
         httpd_register_uri_handler(server, &normal_uri);
+
+        httpd_uri_t freq_uri = {
+            .uri = "/freq",
+            .method = HTTP_POST,
+            .handler = freq_handler,
+            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &freq_uri);
     }
 
     return server;
@@ -1697,13 +1756,13 @@ void app_main(void)
     // ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
 
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
-    
+
     init_trigger_pwm(); // Inicializar DAC para trigger
 
-    #ifdef USE_EXTERNAL_ADC
+#ifdef USE_EXTERNAL_ADC
     spi_master_init();
     init_mcpwm_trigger();
-    #endif
+#endif
 
     // Inicializar Wi-Fi
     wifi_init();
@@ -1714,7 +1773,6 @@ void app_main(void)
     // Iniciar el temporizador
     // my_timer_init();
     configure_gpio();
-    
 
     // Crear la tarea para manejar el socket en el núcleo 1
     xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
