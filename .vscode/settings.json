@@ -12,7 +12,9 @@
     "format": "c",
     "include.h": "c",
     "string.h": "c",
-    "stdio.h": "c"
+    "stdio.h": "c",
+    "mcpwm_prelude.h": "c",
+    "mcpwm_timer.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",

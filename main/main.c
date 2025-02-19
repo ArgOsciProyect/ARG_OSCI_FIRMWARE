@@ -304,7 +304,7 @@ void init_mcpwm_trigger(void)
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
         .resolution_hz = TRIGGER_PWM_FREQ_HZ * 32,
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
-        .period_ticks = 32,
+        .period_ticks = period_ticks,
     };
     ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
 
@@ -347,7 +347,7 @@ void init_mcpwm_trigger(void)
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
                                                                 MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
 
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(26)));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(compare_value)));
     ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
     ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
     ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
@@ -689,10 +689,14 @@ void socket_task(void *pvParameters)
 #endif
             }
 #ifdef USE_EXTERNAL_ADC
-            esp_err_t ret = spi_device_polling_transmit(spi, &t);
-            if (ret != ESP_OK)
-            {
-                ESP_LOGE(TAG, "SPI transaction failed");
+            esp_err_t ret;
+            if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
+                ret = spi_device_polling_transmit(spi, &t);
+                if (ret != ESP_OK)
+                {
+                    ESP_LOGE(TAG, "SPI transaction failed");
+                }
+                xSemaphoreGive(spi_mutex);
             }
 
 #else
@@ -1048,37 +1052,102 @@ static esp_err_t single_handler(httpd_req_t *req)
 
 static esp_err_t freq_handler(httpd_req_t *req)
 {
+    int final_freq;
     char content[100];
     int received = httpd_req_recv(req, content, sizeof(content) - 1);
-    if (received <= 0)
-    {
+    if (received <= 0) {
         return httpd_resp_send_408(req);
     }
     content[received] = '\0';
 
     cJSON *root = cJSON_Parse(content);
-    if (!root)
-    {
+    if (!root) {
         return httpd_resp_send_500(req);
     }
 
-    // Por ahora no hacemos nada con "action"
+    // Obtener acción (more/less)
     cJSON *action = cJSON_GetObjectItem(root, "action");
-    if (!cJSON_IsString(action))
-    {
+    if (!cJSON_IsString(action)) {
         cJSON_Delete(root);
         return httpd_resp_send_500(req);
     }
 
+    // Determinar factor según acción
+    float factor_freq_value = strcmp(action->valuestring, "more") == 0 ? 2.0f : 0.5f;
+
+    ESP_LOGI(TAG, "Factor: %f", factor_freq_value);
+
+    // Obtener frecuencia actual del SPI
+    int current_freq;
+    spi_device_get_actual_freq(spi, &current_freq);
+    current_freq = current_freq * 1000;
+    ESP_LOGI(TAG, "Current freq: %d", current_freq);
+    // Calcular nueva frecuencia
+    int new_freq = (int)(current_freq * factor_freq_value);
+    
+    ESP_LOGI(TAG, "New frequency: %d", new_freq);
+
+    // Limitar frecuencia máxima
+    if (new_freq > 40000000) {
+        new_freq = 40000000;
+    }
+
+    if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
+        // Reinicializar SPI con nueva frecuencia
+        ESP_LOGI(TAG, "Reinitializing SPI with new frequency: %d", new_freq);
+        ESP_ERROR_CHECK(spi_bus_remove_device(spi));
+        
+        spi_device_interface_config_t devcfg = {
+            .clock_speed_hz = new_freq,
+            .mode = 0,
+            .spics_io_num = PIN_NUM_CS,
+            .queue_size = 7,
+            .pre_cb = NULL,
+            .post_cb = NULL,
+            .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
+            .cs_ena_pretrans = 10,
+            .input_delay_ns = 33
+        };
+
+        ESP_LOGI(TAG, "Initailizing device");
+
+        ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &devcfg, &spi));
+
+        // Obtener frecuencia actual para respuesta
+        spi_device_get_actual_freq(spi, &final_freq);
+        final_freq = final_freq * 1000;
+
+        ESP_LOGI(TAG, "Spi actual freq: %d", final_freq);
+        factor_freq_value = (float)final_freq / current_freq;
+        ESP_LOGI(TAG, "Spi factor_freq_value: %f", factor_freq_value);
+
+        // Actualizar MCPWM
+        period_ticks =  period_ticks / factor_freq_value;
+
+        ESP_LOGI(TAG, "Period ticks: %lu", period_ticks);
+        uint32_t new_period = (uint32_t)(period_ticks);
+        ESP_ERROR_CHECK(mcpwm_timer_set_period(timer, new_period));
+        ESP_LOGI(TAG, "setted timer device");
+
+        // Actualizar valor del comparador
+        compare_value = compare_value / factor_freq_value;
+
+        ESP_LOGI(TAG, "Compare value: %lu", compare_value);
+        uint32_t new_compare = (uint32_t)(compare_value);
+        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, new_compare));
+        ESP_LOGI(TAG, "setted compare device");
+
+        xSemaphoreGive(spi_mutex);
+    }
+
     // Construir respuesta
     cJSON *response = cJSON_CreateObject();
-    cJSON_AddNumberToObject(response, "sampling_frequency", get_sampling_frequency());
-
+    cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*1000);
+    
     const char *json_response = cJSON_Print(response);
     httpd_resp_send(req, json_response, strlen(json_response));
 
-    ESP_LOGI(TAG, "Frequency handler called, action: %s", action->valuestring);
-
+    // Cleanup
     free((void *)json_response);
     cJSON_Delete(response);
     cJSON_Delete(root);
@@ -1760,6 +1829,9 @@ void app_main(void)
     init_trigger_pwm(); // Inicializar DAC para trigger
 
 #ifdef USE_EXTERNAL_ADC
+    if (spi_mutex == NULL) {
+        spi_mutex = xSemaphoreCreateMutex();
+    }
     spi_master_init();
     init_mcpwm_trigger();
 #endif
@@ -1775,7 +1847,7 @@ void app_main(void)
     configure_gpio();
 
     // Crear la tarea para manejar el socket en el núcleo 1
-    xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
+    //xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
 
     xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
 }

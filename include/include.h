@@ -67,6 +67,11 @@ static mcpwm_timer_handle_t timer = NULL;
 static mcpwm_oper_handle_t oper = NULL;
 static mcpwm_cmpr_handle_t comparator = NULL;
 static mcpwm_gen_handle_t generator = NULL;
+static uint32_t compare_value = 26;
+static uint32_t period_ticks = 32;
+
+// Proteger acceso al SPI con semáforo
+static SemaphoreHandle_t spi_mutex = NULL;
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"
