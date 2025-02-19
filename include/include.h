@@ -51,6 +51,22 @@
 #define TRIGGER_PWM_FREQ_HZ 2500000  // 2.5MHz
 #define TRIGGER_PWM_GPIO 16
 #define SYNC_GPIO 17  // Pin for synchronization
+#define CS_CLK_TO_PWM 10 // cs_ena_pretrans
+#define DELAY_NS 33 // input_delay_ns
+#define SPI_FREQ 40000000 // frecuencia_SPI
+#define PERIOD_TICKS 32 // period_ticks MCPWM
+#define COMPARE_VALUE 26 // compare_value MCPWM
+#define MATRIX_SPI_ROWS 7
+#define MATRIX_SPI_COLS 5
+#define MATRIX_SPI_FREQ { \
+    {40000000, CS_CLK_TO_PWM, DELAY_NS, PERIOD_TICKS, COMPARE_VALUE}, \
+    {20000000, CS_CLK_TO_PWM-2, DELAY_NS+13, PERIOD_TICKS*2, COMPARE_VALUE*2}, \
+    {10000000, CS_CLK_TO_PWM-3, DELAY_NS+38, PERIOD_TICKS*4, COMPARE_VALUE*4}, \
+    {5000000, CS_CLK_TO_PWM-3, DELAY_NS+188, PERIOD_TICKS*8, COMPARE_VALUE*8}, \
+    {2500000, CS_CLK_TO_PWM-4, DELAY_NS+88, PERIOD_TICKS*16, COMPARE_VALUE*16}, \
+    {1250000, CS_CLK_TO_PWM-4, DELAY_NS+288, PERIOD_TICKS*32, COMPARE_VALUE*32}, \
+    {625000, CS_CLK_TO_PWM-4, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
+}
 
 #define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
@@ -67,8 +83,8 @@ static mcpwm_timer_handle_t timer = NULL;
 static mcpwm_oper_handle_t oper = NULL;
 static mcpwm_cmpr_handle_t comparator = NULL;
 static mcpwm_gen_handle_t generator = NULL;
-static uint32_t compare_value = 26;
-static uint32_t period_ticks = 32;
+static const uint32_t spi_matrix[MATRIX_SPI_ROWS][MATRIX_SPI_COLS] = MATRIX_SPI_FREQ;
+static int spi_index = 1;
 
 // Proteger acceso al SPI con semáforo
 static SemaphoreHandle_t spi_mutex = NULL;

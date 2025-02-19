@@ -269,15 +269,15 @@ void spi_master_init()
 
     // Configurar el dispositivo SPI
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 48 * 1000 * 1000, // Velocidad del reloj SPI (10 MHz)
+        .clock_speed_hz = spi_matrix[0][0], // Velocidad del reloj SPI (10 MHz)
         .mode = 0,                          // Modo SPI 0
         .spics_io_num = PIN_NUM_CS,         // Pin CS
         .queue_size = 7,                    // Tamaño de la cola de transacciones
         .pre_cb = NULL,                     // Callback antes de cada transacción
         .post_cb = NULL,                    // Callback después de cada transacción
         .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-        .cs_ena_pretrans = 10,
-        .input_delay_ns = 33};
+        .cs_ena_pretrans = spi_matrix[0][1],
+        .input_delay_ns = spi_matrix[0][2]};
 
     // Inicializar el dispositivo SPI
 
@@ -304,7 +304,7 @@ void init_mcpwm_trigger(void)
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
         .resolution_hz = TRIGGER_PWM_FREQ_HZ * 32,
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
-        .period_ticks = period_ticks,
+        .period_ticks = spi_matrix[0][3],
     };
     ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
 
@@ -347,7 +347,7 @@ void init_mcpwm_trigger(void)
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
                                                                 MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
 
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(compare_value)));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(spi_matrix[0][4])));
     ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
     ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
     ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
@@ -1072,73 +1072,51 @@ static esp_err_t freq_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
-    // Determinar factor según acción
-    float factor_freq_value = strcmp(action->valuestring, "more") == 0 ? 2.0f : 0.5f;
-
-    ESP_LOGI(TAG, "Factor: %f", factor_freq_value);
-
-    // Obtener frecuencia actual del SPI
-    int current_freq;
-    spi_device_get_actual_freq(spi, &current_freq);
-    current_freq = current_freq * 1000;
-    ESP_LOGI(TAG, "Current freq: %d", current_freq);
-    // Calcular nueva frecuencia
-    int new_freq = (int)(current_freq * factor_freq_value);
-    
-    ESP_LOGI(TAG, "New frequency: %d", new_freq);
-
-    // Limitar frecuencia máxima
-    if (new_freq > 40000000) {
-        new_freq = 40000000;
+    // Determinar índice según acción
+    if(strcmp(action->valuestring, "more") == 0 && spi_index != 6){
+        spi_index++;
     }
+    if(strcmp(action->valuestring, "less") == 0 && spi_index != 0){
+        spi_index--;
+    }
+
+    ESP_LOGI(TAG, "Índice spi: %d", spi_index);
 
     if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
         // Reinicializar SPI con nueva frecuencia
-        ESP_LOGI(TAG, "Reinitializing SPI with new frequency: %d", new_freq);
+        ESP_LOGI(TAG, "Reinitializing SPI with new frequency: %lu", spi_matrix[spi_index][0]);
         ESP_ERROR_CHECK(spi_bus_remove_device(spi));
         
         spi_device_interface_config_t devcfg = {
-            .clock_speed_hz = new_freq,
+            .clock_speed_hz = spi_matrix[spi_index][0],
             .mode = 0,
             .spics_io_num = PIN_NUM_CS,
             .queue_size = 7,
             .pre_cb = NULL,
             .post_cb = NULL,
             .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
-            .cs_ena_pretrans = 10,
-            .input_delay_ns = 33
+            .cs_ena_pretrans = spi_matrix[spi_index][1],
+            .input_delay_ns = spi_matrix[spi_index][2]
         };
 
         ESP_LOGI(TAG, "Initailizing device");
 
         ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &devcfg, &spi));
 
-        // Obtener frecuencia actual para respuesta
-        spi_device_get_actual_freq(spi, &final_freq);
-        final_freq = final_freq * 1000;
-
-        ESP_LOGI(TAG, "Spi actual freq: %d", final_freq);
-        factor_freq_value = (float)final_freq / current_freq;
-        ESP_LOGI(TAG, "Spi factor_freq_value: %f", factor_freq_value);
-
         // Actualizar MCPWM
-        period_ticks =  period_ticks / factor_freq_value;
-
-        ESP_LOGI(TAG, "Period ticks: %lu", period_ticks);
-        uint32_t new_period = (uint32_t)(period_ticks);
-        ESP_ERROR_CHECK(mcpwm_timer_set_period(timer, new_period));
+        ESP_LOGI(TAG, "Period ticks: %lu", spi_matrix[spi_index][3]);
+        ESP_ERROR_CHECK(mcpwm_timer_set_period(timer, spi_matrix[spi_index][3]));
         ESP_LOGI(TAG, "setted timer device");
 
         // Actualizar valor del comparador
-        compare_value = compare_value / factor_freq_value;
-
-        ESP_LOGI(TAG, "Compare value: %lu", compare_value);
-        uint32_t new_compare = (uint32_t)(compare_value);
-        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, new_compare));
+        ESP_LOGI(TAG, "Compare value: %lu", spi_matrix[spi_index][4]);
+        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, spi_matrix[spi_index][4]));
         ESP_LOGI(TAG, "setted compare device");
 
         xSemaphoreGive(spi_mutex);
     }
+
+    ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &final_freq));
 
     // Construir respuesta
     cJSON *response = cJSON_CreateObject();
