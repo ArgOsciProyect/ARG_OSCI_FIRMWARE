@@ -1073,10 +1073,10 @@ static esp_err_t freq_handler(httpd_req_t *req)
     }
 
     // Determinar índice según acción
-    if(strcmp(action->valuestring, "more") == 0 && spi_index != 6){
+    if(strcmp(action->valuestring, "less") == 0 && spi_index != 6){
         spi_index++;
     }
-    if(strcmp(action->valuestring, "less") == 0 && spi_index != 0){
+    if(strcmp(action->valuestring, "more") == 0 && spi_index != 0){
         spi_index--;
     }
 
@@ -1120,7 +1120,7 @@ static esp_err_t freq_handler(httpd_req_t *req)
 
     // Construir respuesta
     cJSON *response = cJSON_CreateObject();
-    cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*1000);
+    cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*1000/16);
     
     const char *json_response = cJSON_Print(response);
     httpd_resp_send(req, json_response, strlen(json_response));
