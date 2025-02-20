@@ -95,6 +95,16 @@ static int get_samples_per_packet(void)
     return total_samples - get_discard_head() - get_discard_trailer();
 }
 
+static int get_max_bits(void)
+{
+    return 512;
+}
+
+static int get_mid_bits(void)
+{
+    return 256;
+}
+
 static esp_err_t config_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Config handler called");
@@ -113,8 +123,10 @@ static esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "useful_bits", get_useful_bits());
     cJSON_AddNumberToObject(config, "samples_per_packet", get_samples_per_packet());
     cJSON_AddNumberToObject(config, "dividing_factor", dividing_factor());
-    cJSON_AddNumberToObject(config, "discard_head", get_discard_head());       // New field
-    cJSON_AddNumberToObject(config, "discard_trailer", get_discard_trailer()); // New field
+    cJSON_AddNumberToObject(config, "discard_head", get_discard_head());       
+    cJSON_AddNumberToObject(config, "discard_trailer", get_discard_trailer()); 
+    cJSON_AddStringToObject(config, "max_bits", get_max_bits());
+    cJSON_AddStringToObject(config, "mid_bits", get_mid_bits());
 
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));
