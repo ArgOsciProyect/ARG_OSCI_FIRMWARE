@@ -97,12 +97,12 @@ static int get_samples_per_packet(void)
 
 static int get_max_bits(void)
 {
-    return 512;
+    return 2047;
 }
 
 static int get_mid_bits(void)
 {
-    return 256;
+    return 1024;
 }
 
 static esp_err_t config_handler(httpd_req_t *req)
@@ -125,8 +125,8 @@ static esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "dividing_factor", dividing_factor());
     cJSON_AddNumberToObject(config, "discard_head", get_discard_head());       
     cJSON_AddNumberToObject(config, "discard_trailer", get_discard_trailer()); 
-    cJSON_AddStringToObject(config, "max_bits", get_max_bits());
-    cJSON_AddStringToObject(config, "mid_bits", get_mid_bits());
+    cJSON_AddNumberToObject(config, "max_bits", get_max_bits());
+    cJSON_AddNumberToObject(config, "mid_bits", get_mid_bits());
 
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));

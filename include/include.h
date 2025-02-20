@@ -41,7 +41,7 @@
 #define TIMER_INTERVAL_US 2048 // Timer interval in microseconds
 #define MAX_CLIENTS 100
 #define ADC_CHANNEL ADC_CHANNEL_5
-#define ADC_BITWIDTH ADC_WIDTH_BIT_9
+#define ADC_BITWIDTH ADC_WIDTH_BIT_10
 #define SAMPLE_RATE_HZ 2000000 // 2 MHz
 #define GPIO_INPUT_PIN GPIO_NUM_11  // Using GPIO 11
 #define PIN_NUM_MISO 12
@@ -68,7 +68,7 @@
     {625000, CS_CLK_TO_PWM-3, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
 }
 
-#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 25920
