@@ -14,7 +14,9 @@
     "string.h": "c",
     "stdio.h": "c",
     "mcpwm_prelude.h": "c",
-    "mcpwm_timer.h": "c"
+    "mcpwm_timer.h": "c",
+    "spi_master.h": "c",
+    "pulse_cnt.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",

@@ -28,6 +28,8 @@
 #include "driver/adc.h"
 #include "driver/spi_master.h"
 #include "driver/mcpwm_prelude.h"
+#include "driver/pulse_cnt.h"
+
 
 #define WIFI_SSID "ESP32_AP"
 #define WIFI_PASSWORD "password123"
@@ -48,14 +50,23 @@
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 #define PIN_NUM_CS   15
-#define TRIGGER_PWM_FREQ_HZ 2500000  // 2.5MHz
-#define TRIGGER_PWM_GPIO 16
+#define MCPWM_FREQ_HZ 2500000  // 2.5MHz
+#define MCPWM_GPIO 16
 #define SYNC_GPIO 17  // Pin for synchronization
 #define CS_CLK_TO_PWM 10 // cs_ena_pretrans
 #define DELAY_NS 33 // input_delay_ns
 #define SPI_FREQ 40000000 // frecuencia_SPI
 #define PERIOD_TICKS 32 // period_ticks MCPWM
 #define COMPARE_VALUE 26 // compare_value MCPWM
+#define TRIGGER_PWM_FREQ 78125 // 25kHz
+#define TRIGGER_PWM_TIMER LEDC_TIMER_0
+#define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
+#define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
+#define TRIGGER_PWM_RES LEDC_TIMER_10_BIT // 8-bit resolution (0-255)
+#define SINGLE_INPUT_PIN GPIO_NUM_19
+#define PCNT_UNIT PCNT_UNIT_0
+#define PCNT_HIGH_LIMIT INT16_MAX
+#define PCNT_LOW_LIMIT INT16_MIN
 #define MATRIX_SPI_ROWS 7
 #define MATRIX_SPI_COLS 5
 #define MATRIX_SPI_FREQ { \
@@ -68,10 +79,10 @@
     {625000, CS_CLK_TO_PWM-3, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
 }
 
-//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 #ifdef USE_EXTERNAL_ADC
-#define BUF_SIZE 25920
+#define BUF_SIZE 17280*4
 #else
 #define BUF_SIZE 17280*3
 #endif
@@ -85,9 +96,18 @@ static mcpwm_cmpr_handle_t comparator = NULL;
 static mcpwm_gen_handle_t generator = NULL;
 static const uint32_t spi_matrix[MATRIX_SPI_ROWS][MATRIX_SPI_COLS] = MATRIX_SPI_FREQ;
 static int spi_index = 0;
-
+static ledc_channel_config_t ledc_channel;
+static atomic_int mode = 0;
+static atomic_int last_state = 0;
+static atomic_int trigger_edge = 0;
+static atomic_int current_state = 0;
+static pcnt_unit_handle_t pcnt_unit = NULL;
+static pcnt_channel_handle_t pcnt_chan = NULL;
 // Proteger acceso al SPI con semáforo
 static SemaphoreHandle_t spi_mutex = NULL;
+
+TickType_t xCurrentTime = 0;
+TickType_t xLastWakeTime = 0;
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"

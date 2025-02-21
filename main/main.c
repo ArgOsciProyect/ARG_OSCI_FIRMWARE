@@ -10,13 +10,6 @@ static SemaphoreHandle_t key_gen_semaphore;
 static heap_trace_record_t trace_record[HEAP_TRACE_ITEMS];
 static uint64_t wait_time_us;
 
-// Global variables declaration
-static atomic_int mode = 0;
-static atomic_int last_state = 0;
-static atomic_int trigger_edge = 0;
-static atomic_int current_state = 0;
-#define GPIO_INPUT_PIN GPIO_NUM_19 // Reemplaza GPIO_NUM_4 con el pin que desees usar
-
 // Helper functions for device configuration
 static double get_sampling_frequency(void)
 {
@@ -97,12 +90,21 @@ static int get_samples_per_packet(void)
 
 static int get_max_bits(void)
 {
-    return 2047;
+    #ifdef USE_EXTERNAL_ADC
+    return 1023;
+    #else
+    return 1023;
+    #endif
 }
 
 static int get_mid_bits(void)
 {
-    return 1024;
+    // get_mid_bits must always be greater than half of get_max_bits
+    #ifdef USE_EXTERNAL_ADC
+    return 512;
+    #else
+    return 512;
+    #endif
 }
 
 static esp_err_t config_handler(httpd_req_t *req)
@@ -314,7 +316,7 @@ void init_mcpwm_trigger(void)
     mcpwm_timer_config_t timer_config = {
         .group_id = 0,
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
-        .resolution_hz = TRIGGER_PWM_FREQ_HZ * 32,
+        .resolution_hz = MCPWM_FREQ_HZ * 32,
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         .period_ticks = spi_matrix[0][3],
     };
@@ -350,7 +352,7 @@ void init_mcpwm_trigger(void)
     ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &comparator));
 
     mcpwm_generator_config_t generator_config = {
-        .gen_gpio_num = TRIGGER_PWM_GPIO,
+        .gen_gpio_num = MCPWM_GPIO,
     };
     ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
 
@@ -493,6 +495,41 @@ void my_timer_init()
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
 }
 
+#ifdef USE_EXTERNAL_ADC
+esp_err_t init_pulse_counter(void)
+{
+    // Configuración básica del contador
+    pcnt_unit_config_t unit_config = {
+        .high_limit = PCNT_HIGH_LIMIT,
+        .low_limit = PCNT_LOW_LIMIT,
+    };
+    ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
+
+    // Configuración del canal
+    pcnt_chan_config_t chan_config = {
+        .edge_gpio_num = SINGLE_INPUT_PIN,
+        .level_gpio_num = -1, // No usado
+    };
+    ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_config, &pcnt_chan));
+
+    // Configuración del modo de conteo (inicialmente para flanco positivo)
+    pcnt_glitch_filter_config_t filter_config = {
+        .max_glitch_ns = 1000,
+    };
+    ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
+    
+    // Configurar para contar en flanco positivo
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan, 
+                                                PCNT_CHANNEL_EDGE_ACTION_INCREASE, // Acción en flanco positivo
+                                                PCNT_CHANNEL_EDGE_ACTION_HOLD));   // Acción en flanco negativo
+    
+    // Habilitar el contador
+    ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
+    
+    return ESP_OK;
+}
+#endif
+
 void configure_gpio(void)
 {
     // Alimentar el watchdog antes de configurar el GPIO
@@ -501,7 +538,7 @@ void configure_gpio(void)
     gpio_config_t io_conf;
     io_conf.intr_type = GPIO_INTR_DISABLE;           // No interrupciones
     io_conf.mode = GPIO_MODE_INPUT;                  // Configurar como entrada
-    io_conf.pin_bit_mask = (1ULL << GPIO_INPUT_PIN); // Seleccionar el pin
+    io_conf.pin_bit_mask = (1ULL << SINGLE_INPUT_PIN); // Seleccionar el pin
     io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;     // Deshabilitar pull-down
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;        // Habilitar pull-up
     gpio_config(&io_conf);
@@ -571,25 +608,25 @@ void socket_task(void *pvParameters)
 
     uint32_t len;
 
-#ifdef USE_EXTERNAL_ADC
-    uint16_t buffer[BUF_SIZE];
+    #ifdef USE_EXTERNAL_ADC
+    uint8_t buffer[BUF_SIZE];
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = 0;
-    t.rxlength = BUF_SIZE * 16;
+    t.rxlength = BUF_SIZE * 8;
     t.rx_buffer = buffer;
     t.flags = 0;
-    len = BUF_SIZE * 2;
-#else
+    len = BUF_SIZE;
+    #else
     uint8_t buffer[BUF_SIZE];
-#endif
+    #endif
 
-// Calculate actual data to send
-#ifdef USE_EXTERNAL_ADC
-    size_t sample_size = sizeof(uint16_t);
-#else
+    // Calculate actual data to send
+    #ifdef USE_EXTERNAL_ADC
     size_t sample_size = sizeof(uint8_t);
-#endif
+    #else
+    size_t sample_size = sizeof(uint8_t);
+    #endif
 
     void *send_buffer = buffer + (get_discard_head() * sample_size);
     size_t send_len = get_samples_per_packet() * sample_size;
@@ -618,62 +655,54 @@ void socket_task(void *pvParameters)
             ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
         }
 
-#ifndef USE_EXTERNAL_ADC
+        #ifdef USE_EXTERNAL_ADC
+        esp_err_t ret;
+        #else
         start_adc_sampling();
-#endif
+        #endif
 
         while (1)
         {
             if (mode == 1)
             {
-#ifdef USE_EXTERNAL_ADC
-// bool edge_detected = 0;
-// esp_err_t ret = spi_device_polling_start(spi, &t, portMAX_DELAY);
-// if (ret != ESP_OK) {
-//     ESP_LOGE(TAG, "SPI transaction failed");
-// }
-// TickType_t xLastWakeTime = xTaskGetTickCount();
-// TickType_t xCurrentTime = xTaskGetTickCount();
-// while(pdMS_TO_TICKS(11) > (xCurrentTime - xLastWakeTime)){
-//     current_state = gpio_get_level(GPIO_INPUT_PIN);
-//     edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
-//                             (current_state < last_state);                    // Negative edge
+                #ifdef USE_EXTERNAL_ADC
+                
+                if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
 
-//     last_state = current_state;
-//     xCurrentTime = xTaskGetTickCount();
-//     if (!edge_detected)
-//     {
-//         continue;
-//     }
-//     break;
-// }
-// ret = spi_device_polling_end(spi, &t);
-// if (ret != ESP_OK) {
-//     ESP_LOGE(TAG, "SPI transaction failed");
-// }
-// if (!edge_detected)
-// {
-//     continue;
-// }
-// if (ret == ESP_OK && len > 0)
-// {
-// // Prepare data for sending
-//     ssize_t sent = send(client_sock, send_buffer, send_len, flags);
-//     if (sent < 0)
-//     {
-//         if (errno == EAGAIN || errno == EWOULDBLOCK)
-//         {
-//             vTaskDelay(pdMS_TO_TICKS(10));
-//             continue;
-//         }
-//         ESP_LOGE(TAG, "Send error: errno %d", errno);
-//         break;
-//     }
-// }
-// continue;
-#else
+                    ret = spi_device_polling_transmit(spi, &t);
+                    if (ret != ESP_OK)
+                    {
+                        ESP_LOGE(TAG, "SPI transaction failed");
+                    }
+                    xSemaphoreGive(spi_mutex);
+                }
+                
+                pcnt_unit_get_count(pcnt_unit, &current_state);
+                if(last_state == current_state){
+                    continue;
+                }
+                last_state = current_state;
+                if (ret == ESP_OK && len > 0)
+                {
+
+                    // Prepare data for sending
+                    ssize_t sent = send(client_sock, send_buffer, send_len, flags);
+                    if (sent < 0)
+                    {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            vTaskDelay(pdMS_TO_TICKS(10));
+                            continue;
+                        }
+                        ESP_LOGE(TAG, "Send error: errno %d", errno);
+                        break;
+                    }
+                }
+                continue;
+
+                #else
                 TickType_t xLastWakeTime = xTaskGetTickCount();
-                current_state = gpio_get_level(GPIO_INPUT_PIN);
+                current_state = gpio_get_level(SINGLE_INPUT_PIN);
 
                 //// Debug log moved before state update
                 // ESP_LOGI(TAG, "Current: %d, Previous: %d, Edge type: %s",
@@ -682,7 +711,7 @@ void socket_task(void *pvParameters)
 
                 // Check for specific edge type
                 bool edge_detected = (trigger_edge == 1) ? (current_state > last_state) : // Positive edge
-                                         (current_state < last_state);                    // Negative edge
+                                            (current_state < last_state);                    // Negative edge
 
                 // TODO Ver si usar un valor diferente de delay para positivo o negativo
                 // TODO Soluciona el problema de que uno aparece muy a la izquierda y el otro muy a la derecha
@@ -697,11 +726,10 @@ void socket_task(void *pvParameters)
 
                 TickType_t xCurrentTime = xTaskGetTickCount();
                 vTaskDelay(pdMS_TO_TICKS(12) - (xCurrentTime - xLastWakeTime));
-// esp_rom_delay_us(24824);
-#endif
+                // esp_rom_delay_us(24824);
+                #endif
             }
 #ifdef USE_EXTERNAL_ADC
-            esp_err_t ret;
             if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
                 ret = spi_device_polling_transmit(spi, &t);
                 if (ret != ESP_OK)
@@ -939,14 +967,6 @@ esp_err_t test_handler(httpd_req_t *req)
     return ret;
 }
 
-// Add to global variables
-static ledc_channel_config_t ledc_channel;
-#define TRIGGER_PWM_FREQ 78125 // 25kHz
-#define TRIGGER_PWM_TIMER LEDC_TIMER_0
-#define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
-#define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
-#define TRIGGER_PWM_RES LEDC_TIMER_10_BIT // 8-bit resolution (0-255)
-
 void init_trigger_pwm(void)
 {
     ledc_timer_config_t ledc_timer = {
@@ -1055,7 +1075,22 @@ static esp_err_t single_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     mode = 1;
-    last_state = gpio_get_level(GPIO_INPUT_PIN);
+
+    #ifdef USE_EXTERNAL_ADC
+    ESP_ERROR_CHECK(pcnt_unit_start(pcnt_unit));
+    if(trigger_edge==1){
+        ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan, 
+                                                PCNT_CHANNEL_EDGE_ACTION_INCREASE, // Acción en flanco positivo
+                                                PCNT_CHANNEL_EDGE_ACTION_HOLD));   // Acción en flanco negativo
+    }else{
+        ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan, 
+                                                PCNT_CHANNEL_EDGE_ACTION_HOLD, // Acción en flanco positivo
+                                                PCNT_CHANNEL_EDGE_ACTION_INCREASE));   // Acción en flanco negativo
+    }
+    pcnt_unit_get_count(pcnt_unit, &last_state);
+    #else
+    last_state = gpio_get_level(SINGLE_INPUT_PIN);
+    #endif
 
     // Simple JSON response
     const char *response = "{\"mode\":\"Single\"}";
@@ -1226,8 +1261,12 @@ static esp_err_t normal_handler(httpd_req_t *req)
     // Set content type to JSON
     httpd_resp_set_type(req, "application/json");
 
-    mode = 0;
+    #ifdef USE_EXTERNAL_ADC
+    ESP_ERROR_CHECK(pcnt_unit_stop(pcnt_unit));
+    #endif
 
+    mode = 0;
+    
     // Simple JSON response
     const char *response = "{\"mode\":\"Normal\"}";
     return httpd_resp_send(req, response, strlen(response));
@@ -1818,13 +1857,13 @@ void app_main(void)
 
     init_trigger_pwm(); // Inicializar DAC para trigger
 
-#ifdef USE_EXTERNAL_ADC
+    #ifdef USE_EXTERNAL_ADC
     if (spi_mutex == NULL) {
         spi_mutex = xSemaphoreCreateMutex();
     }
     spi_master_init();
     init_mcpwm_trigger();
-#endif
+    #endif
 
     // Inicializar Wi-Fi
     wifi_init();
@@ -1832,12 +1871,13 @@ void app_main(void)
     // Iniciar servidor web
     start_webserver();
 
-    // Iniciar el temporizador
-    // my_timer_init();
     configure_gpio();
+    #ifdef USE_EXTERNAL_ADC
+    init_pulse_counter(); // Agregar esta línea
+    #endif
 
     // Crear la tarea para manejar el socket en el núcleo 1
     //xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
 
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 72000, NULL, 5, &socket_task_handle, 1);
 }
