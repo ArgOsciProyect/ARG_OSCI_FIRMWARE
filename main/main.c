@@ -433,6 +433,7 @@ void config_adc_sampling(){
 
     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
     ESP_LOGI(TAG, "Configured ADC");
+    wait_convertion_time = WAIT_ADC_CONV_TIME*adc_divider;
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
     ESP_LOGI(TAG, "Started ADC");
 }
@@ -691,7 +692,7 @@ void socket_task(void *pvParameters)
         #else
         start_adc_sampling();
         #endif
-
+        
         while (1)
         {
             if (mode == 1)
@@ -775,9 +776,9 @@ void socket_task(void *pvParameters)
                 config_adc_sampling();
                 adc_modify_freq = 0;
             }
+            vTaskDelay(pdMS_TO_TICKS(wait_convertion_time));
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
             #endif
-            ESP_LOGI(TAG, "Read %lu bytes", len);
             if (ret == ESP_OK && len > 0)
             {
 

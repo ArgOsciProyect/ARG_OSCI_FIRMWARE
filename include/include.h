@@ -79,6 +79,7 @@
     {625000, CS_CLK_TO_PWM-3, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
 }
 #define SPI_FREQ_SCALE_FACTOR 1000/16
+#define WAIT_ADC_CONV_TIME 15
 
 //#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
@@ -92,6 +93,7 @@ static adc_continuous_handle_t adc_handle;
 static atomic_int adc_modify_freq = 0;
 static atomic_int adc_divider = 1;
 static int read_miss_count = 0;
+static int wait_convertion_time = WAIT_ADC_CONV_TIME;
 static spi_device_handle_t spi;
 static mcpwm_timer_handle_t timer = NULL;
 static mcpwm_oper_handle_t oper = NULL;
