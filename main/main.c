@@ -729,6 +729,15 @@ void socket_task(void *pvParameters)
                         ESP_LOGE(TAG, "Send error: errno %d", errno);
                         break;
                     }
+                }else
+                {
+                    read_miss_count++;
+                    ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                    if (read_miss_count >= 10)
+                    {
+                        ESP_LOGE(TAG, "Critical ADC or SPI data loss detected.");
+                        read_miss_count = 0;
+                    }
                 }
                 continue;
 
@@ -757,7 +766,34 @@ void socket_task(void *pvParameters)
                 // If we get here, edge was detected
 
                 TickType_t xCurrentTime = xTaskGetTickCount();
-                vTaskDelay(pdMS_TO_TICKS(12) - (xCurrentTime - xLastWakeTime));
+                vTaskDelay(pdMS_TO_TICKS(wait_convertion_time/2) - (xCurrentTime - xLastWakeTime));
+                int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
+                if (ret == ESP_OK && len > 0)
+                {
+
+                    // Prepare data for sending
+                    ssize_t sent = send(client_sock, send_buffer, send_len, flags);
+                    if (sent < 0)
+                    {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            vTaskDelay(pdMS_TO_TICKS(10));
+                            continue;
+                        }
+                        ESP_LOGE(TAG, "Send error: errno %d", errno);
+                        break;
+                    }
+                }else
+                {
+                    read_miss_count++;
+                    ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                    if (read_miss_count >= 10)
+                    {
+                        ESP_LOGE(TAG, "Critical ADC or SPI data loss detected.");
+                        read_miss_count = 0;
+                    }
+                }
+                continue;
                 // esp_rom_delay_us(24824);
                 #endif
             }
@@ -1001,6 +1037,30 @@ esp_err_t test_handler(httpd_req_t *req)
     cJSON_Delete(response);
 
     return ret;
+}
+
+void init_square_wave(void)
+{
+    // Configurar el timer
+    ledc_timer_config_t timer_conf = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_10_BIT,
+        .timer_num = SQUARE_WAVE_TIMER,
+        .freq_hz = SQUARE_WAVE_FREQ,
+        .clk_cfg = LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
+
+    // Configurar el canal
+    ledc_channel_config_t channel_conf = {
+        .gpio_num = SQUARE_WAVE_GPIO,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = SQUARE_WAVE_CHANNEL,
+        .timer_sel = SQUARE_WAVE_TIMER,
+        .duty = 512,  // 50% duty cycle (1024/2)
+        .hpoint = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
 }
 
 void init_trigger_pwm(void)
@@ -1903,7 +1963,8 @@ void app_main(void)
 
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
 
-    init_trigger_pwm(); // Inicializar DAC para trigger
+    init_trigger_pwm(); // Inicializar PWM para trigger
+    init_square_wave(); // Inicializar señal cuadrada de calibración de 1KHz
 
     #ifdef USE_EXTERNAL_ADC
     if (spi_mutex == NULL) {

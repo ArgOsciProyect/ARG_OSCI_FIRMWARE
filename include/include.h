@@ -63,6 +63,10 @@
 #define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
 #define TRIGGER_PWM_GPIO GPIO_NUM_26      // Choose appropriate GPIO
 #define TRIGGER_PWM_RES LEDC_TIMER_10_BIT // 8-bit resolution (0-255)
+#define SQUARE_WAVE_GPIO    GPIO_NUM_18    // Pin para la señal cuadrada
+#define SQUARE_WAVE_FREQ    1000  // 1 KHz
+#define SQUARE_WAVE_TIMER   LEDC_TIMER_1
+#define SQUARE_WAVE_CHANNEL LEDC_CHANNEL_1
 #define SINGLE_INPUT_PIN GPIO_NUM_19
 #define PCNT_UNIT PCNT_UNIT_0
 #define PCNT_HIGH_LIMIT INT16_MAX
