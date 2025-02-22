@@ -16,7 +16,7 @@ static double get_sampling_frequency(void)
 #ifdef USE_EXTERNAL_ADC
     return 2500000;
 #else
-    return 1650000; // Hardcoded for now, will be calculated later
+    return 1634200; // Hardcoded for now, will be calculated later
 #endif
 }
 
@@ -406,6 +406,37 @@ void stop_adc_sampling()
 }
 #endif
 
+void config_adc_sampling(){
+    ESP_LOGI(TAG, "Reinitializing ADC with new frequency: %d", SAMPLE_RATE_HZ/adc_divider);
+    stop_adc_sampling();
+    ESP_LOGI(TAG, "Stopped ADC");
+
+    adc_continuous_handle_cfg_t adc_config = {
+        .max_store_buf_size = BUF_SIZE * 2,
+        .conv_frame_size = 128,
+        .flags.flush_pool = false,
+    };
+
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+
+    adc_digi_pattern_config_t adc_pattern = {
+        .atten = ADC_ATTEN_DB_12,
+        .channel = ADC_CHANNEL,
+        .bit_width = ADC_BITWIDTH};
+        
+    adc_continuous_config_t continuous_config = {
+        .pattern_num = 1,
+        .adc_pattern = &adc_pattern,
+        .sample_freq_hz = SAMPLE_RATE_HZ/adc_divider,
+        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
+
+    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+    ESP_LOGI(TAG, "Configured ADC");
+    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    ESP_LOGI(TAG, "Started ADC");
+}
+
 static void generate_key_pair_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Generating RSA key pair...");
@@ -729,7 +760,7 @@ void socket_task(void *pvParameters)
                 // esp_rom_delay_us(24824);
                 #endif
             }
-#ifdef USE_EXTERNAL_ADC
+            #ifdef USE_EXTERNAL_ADC
             if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
                 ret = spi_device_polling_transmit(spi, &t);
                 if (ret != ESP_OK)
@@ -739,10 +770,14 @@ void socket_task(void *pvParameters)
                 xSemaphoreGive(spi_mutex);
             }
 
-#else
-            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-#endif
-
+            #else
+            if(adc_modify_freq){
+                config_adc_sampling();
+                adc_modify_freq = 0;
+            }
+            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
+            #endif
+            ESP_LOGI(TAG, "Read %lu bytes", len);
             if (ret == ESP_OK && len > 0)
             {
 
@@ -771,9 +806,9 @@ void socket_task(void *pvParameters)
             }
         }
 
-#ifndef USE_EXTERNAL_ADC
+        #ifndef USE_EXTERNAL_ADC
         stop_adc_sampling();
-#endif
+        #endif
 
         safe_close(client_sock);
         ESP_LOGI(TAG, "Client disconnected");
@@ -1170,33 +1205,16 @@ static esp_err_t freq_handler(httpd_req_t *req)
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*SPI_FREQ_SCALE_FACTOR);
     #else
-    if(strcmp(action->valuestring, "less") == 0 && adc_divider != 512){
+    if(strcmp(action->valuestring, "less") == 0 && adc_divider != 64){
         adc_divider*=2;
     }
     if(strcmp(action->valuestring, "more") == 0 && adc_divider != 1){
         adc_divider/=2;
     }
-
-    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
-
-    adc_digi_pattern_config_t adc_pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .channel = ADC_CHANNEL,
-        .bit_width = ADC_BITWIDTH};
-        
-    adc_continuous_config_t continuous_config = {
-        .pattern_num = 1,
-        .adc_pattern = &adc_pattern,
-        .sample_freq_hz = SAMPLE_RATE_HZ/adc_divider,
-        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
-
-    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
-
-    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    adc_modify_freq = 1;
     // Construir respuesta
     cJSON *response = cJSON_CreateObject();
-    cJSON_AddNumberToObject(response, "sampling_frequency", SAMPLE_RATE_HZ/adc_divider);
+    cJSON_AddNumberToObject(response, "sampling_frequency", get_sampling_frequency()/adc_divider);
     #endif
     const char *json_response = cJSON_Print(response);
     httpd_resp_send(req, json_response, strlen(json_response));

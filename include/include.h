@@ -89,7 +89,8 @@
 #endif
 
 static adc_continuous_handle_t adc_handle;
-static int adc_divider = 1;
+static atomic_int adc_modify_freq = 0;
+static atomic_int adc_divider = 1;
 static int read_miss_count = 0;
 static spi_device_handle_t spi;
 static mcpwm_timer_handle_t timer = NULL;
@@ -106,7 +107,9 @@ static atomic_int current_state = 0;
 static pcnt_unit_handle_t pcnt_unit = NULL;
 static pcnt_channel_handle_t pcnt_chan = NULL;
 // Proteger acceso al SPI con semáforo
+#ifdef USE_EXTERNAL_ADC
 static SemaphoreHandle_t spi_mutex = NULL;
+#endif
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"
