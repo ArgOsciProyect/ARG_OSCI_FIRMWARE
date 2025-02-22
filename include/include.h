@@ -78,8 +78,9 @@
     {1250000, CS_CLK_TO_PWM-3, DELAY_NS+288, PERIOD_TICKS*32, COMPARE_VALUE*32}, \
     {625000, CS_CLK_TO_PWM-3, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
 }
+#define SPI_FREQ_SCALE_FACTOR 1000/16
 
-#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 17280*4
@@ -88,6 +89,7 @@
 #endif
 
 static adc_continuous_handle_t adc_handle;
+static int adc_divider = 1;
 static int read_miss_count = 0;
 static spi_device_handle_t spi;
 static mcpwm_timer_handle_t timer = NULL;
@@ -105,9 +107,6 @@ static pcnt_unit_handle_t pcnt_unit = NULL;
 static pcnt_channel_handle_t pcnt_chan = NULL;
 // Proteger acceso al SPI con semáforo
 static SemaphoreHandle_t spi_mutex = NULL;
-
-TickType_t xCurrentTime = 0;
-TickType_t xLastWakeTime = 0;
 
 #ifdef CONFIG_HEAP_TRACING
     #include "esp_heap_trace.h"

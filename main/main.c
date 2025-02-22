@@ -1119,6 +1119,7 @@ static esp_err_t freq_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
+    #ifdef USE_EXTERNAL_ADC
     // Determinar índice según acción
     if(strcmp(action->valuestring, "less") == 0 && spi_index != 6){
         spi_index++;
@@ -1167,8 +1168,36 @@ static esp_err_t freq_handler(httpd_req_t *req)
 
     // Construir respuesta
     cJSON *response = cJSON_CreateObject();
-    cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*1000/16);
-    
+    cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*SPI_FREQ_SCALE_FACTOR);
+    #else
+    if(strcmp(action->valuestring, "less") == 0 && adc_divider != 512){
+        adc_divider*=2;
+    }
+    if(strcmp(action->valuestring, "more") == 0 && adc_divider != 1){
+        adc_divider/=2;
+    }
+
+    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
+
+    adc_digi_pattern_config_t adc_pattern = {
+        .atten = ADC_ATTEN_DB_12,
+        .channel = ADC_CHANNEL,
+        .bit_width = ADC_BITWIDTH};
+        
+    adc_continuous_config_t continuous_config = {
+        .pattern_num = 1,
+        .adc_pattern = &adc_pattern,
+        .sample_freq_hz = SAMPLE_RATE_HZ/adc_divider,
+        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
+
+    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+
+    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    // Construir respuesta
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddNumberToObject(response, "sampling_frequency", SAMPLE_RATE_HZ/adc_divider);
+    #endif
     const char *json_response = cJSON_Print(response);
     httpd_resp_send(req, json_response, strlen(json_response));
 
@@ -1878,6 +1907,9 @@ void app_main(void)
 
     // Crear la tarea para manejar el socket en el núcleo 1
     //xTaskCreate(memory_monitor_task, "memory_monitor", 2048, NULL, 1, NULL);
-
+    #ifdef USE_EXTERNAL_ADC
     xTaskCreatePinnedToCore(socket_task, "socket_task", 72000, NULL, 5, &socket_task_handle, 1);
+    #else
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
+    #endif
 }
