@@ -695,6 +695,12 @@ void socket_task(void *pvParameters)
         
         while (1)
         {
+            #ifndef USE_EXTERNAL_ADC
+            if(adc_modify_freq){
+                config_adc_sampling();
+                adc_modify_freq = 0;
+            }
+            #endif
             if (mode == 1)
             {
                 #ifdef USE_EXTERNAL_ADC
@@ -806,12 +812,7 @@ void socket_task(void *pvParameters)
                 }
                 xSemaphoreGive(spi_mutex);
             }
-
             #else
-            if(adc_modify_freq){
-                config_adc_sampling();
-                adc_modify_freq = 0;
-            }
             vTaskDelay(pdMS_TO_TICKS(wait_convertion_time));
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
             #endif
