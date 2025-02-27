@@ -11,14 +11,12 @@
     "cjson.h": "c",
     "format": "c",
     "include.h": "c",
-<<<<<<< Updated upstream
     "string.h": "c",
     "stdio.h": "c",
     "mcpwm_prelude.h": "c",
     "mcpwm_timer.h": "c",
     "spi_master.h": "c",
-    "pulse_cnt.h": "c"
-=======
+    "pulse_cnt.h": "c",
     "adc.h": "c",
     "adc_types_legacy.h": "c",
     "gpio.h": "c",
@@ -30,7 +28,6 @@
     "clk_tree_ll.h": "c",
     "adc_i2s_legacy.h": "c",
     "adc1_private.h": "c",
-    "string.h": "c",
     "stdbool.h": "c",
     "esp_types.h": "c",
     "freertos.h": "c",
@@ -76,12 +73,11 @@
     "adc_types_private.h": "c",
     "syscon_reg.h": "c",
     "i2s.h": "c"
->>>>>>> Stashed changes
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
   "idf.adapterTargetName": "esp32",
-  "idf.espIdfPath": "/home/joaquin/esp/v5.4/esp-idf",
-  "idf.toolsPath": "/home/joaquin/.espressif",
+  "idf.espIdfPath": "/home/jotalora/esp/v5.4/esp-idf",
+  "idf.toolsPath": "/home/jotalora/.espressif",
   "idf.portWin": "COM3"
 }

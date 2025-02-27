@@ -632,11 +632,36 @@ void timer_wait()
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
 }
 
+#include "driver/uart.h"
+
+void print_buffer_to_serial(uint8_t* buffer, size_t len) {
+    if (!buffer || len == 0) {
+        ESP_LOGE(TAG, "Invalid buffer or length");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Printing buffer of length %d", len);
+    printf("START_BUFFER\n");
+    
+    // Print first few values for debugging
+    ESP_LOGI(TAG, "First few values: %u %u %u", 
+             buffer[0], buffer[1], buffer[2]);
+
+    for(size_t i = 0; i < len; i++) {
+        printf("%u\n", buffer[i]);
+        // Add small delay to prevent buffer overflow
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    
+    printf("END_BUFFER\n");
+    ESP_LOGI(TAG, "Finished printing buffer");
+}
 void socket_task(void *pvParameters)
 {
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
+    bool first_buffer_saved = false;  // Add this flag
 
     uint32_t len;
 
@@ -774,6 +799,9 @@ void socket_task(void *pvParameters)
                 TickType_t xCurrentTime = xTaskGetTickCount();
                 vTaskDelay(pdMS_TO_TICKS(wait_convertion_time/2) - (xCurrentTime - xLastWakeTime));
                 int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
+
+
+                
                 if (ret == ESP_OK && len > 0)
                 {
 
@@ -815,6 +843,10 @@ void socket_task(void *pvParameters)
             #else
             vTaskDelay(pdMS_TO_TICKS(wait_convertion_time));
             int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000/portTICK_PERIOD_MS);
+            if (!first_buffer_saved) {
+                print_buffer_to_serial(buffer, BUF_SIZE);
+                first_buffer_saved = true;
+            }
             #endif
             if (ret == ESP_OK && len > 0)
             {
