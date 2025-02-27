@@ -404,7 +404,6 @@ void stop_adc_sampling()
     ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
     ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
 }
-#endif
 
 void config_adc_sampling(){
     ESP_LOGI(TAG, "Reinitializing ADC with new frequency: %d", SAMPLE_RATE_HZ/adc_divider);
@@ -437,6 +436,7 @@ void config_adc_sampling(){
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
     ESP_LOGI(TAG, "Started ADC");
 }
+#endif
 
 static void generate_key_pair_task(void *pvParameters)
 {
