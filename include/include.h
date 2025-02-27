@@ -85,7 +85,7 @@
 #define SPI_FREQ_SCALE_FACTOR 1000/16
 #define WAIT_ADC_CONV_TIME 15
 
-//#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
+#define USE_EXTERNAL_ADC  // Comment this line to use internal ADC
 
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 17280*4

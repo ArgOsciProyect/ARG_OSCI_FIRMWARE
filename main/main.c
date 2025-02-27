@@ -91,7 +91,7 @@ static int get_samples_per_packet(void)
 static int get_max_bits(void)
 {
     #ifdef USE_EXTERNAL_ADC
-    return 1023;
+    return 675;
     #else
     return 1023;
     #endif
@@ -101,7 +101,7 @@ static int get_mid_bits(void)
 {
     // get_mid_bits must always be greater than half of get_max_bits
     #ifdef USE_EXTERNAL_ADC
-    return 512;
+    return 338;
     #else
     return 512;
     #endif
