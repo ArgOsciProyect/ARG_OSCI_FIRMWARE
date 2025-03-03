@@ -16,7 +16,7 @@ static double get_sampling_frequency(void)
 #ifdef USE_EXTERNAL_ADC
     return 2500000;
 #else
-    return 1634200; // Hardcoded for now, will be calculated later
+    return 494753; // Hardcoded for now, will be calculated later
 #endif
 }
 
@@ -25,7 +25,7 @@ static int dividing_factor(void)
 #ifdef USE_EXTERNAL_ADC
     return 1;
 #else
-    return 6;
+    return 2;
 #endif
 }
 
@@ -1216,6 +1216,8 @@ static esp_err_t freq_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Chequear si es necesario (parece que si reduce los crashes)
+
     #ifdef USE_EXTERNAL_ADC
     // Determinar índice según acción
     if(strcmp(action->valuestring, "less") == 0 && spi_index != 6){
@@ -1267,7 +1269,7 @@ static esp_err_t freq_handler(httpd_req_t *req)
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "sampling_frequency", final_freq*SPI_FREQ_SCALE_FACTOR);
     #else
-    if(strcmp(action->valuestring, "less") == 0 && adc_divider != 64){
+    if(strcmp(action->valuestring, "less") == 0 && adc_divider != 16){
         adc_divider*=2;
     }
     if(strcmp(action->valuestring, "more") == 0 && adc_divider != 1){
