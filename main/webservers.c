@@ -687,7 +687,7 @@ httpd_handle_t start_webserver(void)
     if (httpd_start(&server, &config) == ESP_OK) {
         // Registrar handlers para distintos endpoints
         httpd_uri_t reset_socket_uri = {
-            .uri = "/reset_socket", .method = HTTP_GET, .handler = reset_socket_handler, .user_ctx = NULL};
+            .uri = "/reset", .method = HTTP_GET, .handler = reset_socket_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &reset_socket_uri);
 
         httpd_uri_t trigger_uri = {
@@ -748,7 +748,7 @@ httpd_handle_t start_second_webserver(void)
 
     if (httpd_start(&second_server, &config) == ESP_OK) {
         httpd_uri_t reset_socket_uri = {
-            .uri = "/reset_socket", .method = HTTP_GET, .handler = reset_socket_handler, .user_ctx = NULL};
+            .uri = "/reset", .method = HTTP_GET, .handler = reset_socket_handler, .user_ctx = NULL};
         httpd_register_uri_handler(second_server, &reset_socket_uri);
 
         httpd_uri_t test_uri = {.uri = "/test", .method = HTTP_POST, .handler = test_handler, .user_ctx = NULL};
