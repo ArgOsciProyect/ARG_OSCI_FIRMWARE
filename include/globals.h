@@ -21,7 +21,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-#define USE_EXTERNAL_ADC
+// #define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"

@@ -183,6 +183,19 @@ esp_err_t trigger_handler(httpd_req_t *req)
         } else if (strcmp(edge->valuestring, "negative") == 0) {
             trigger_edge = 0;
         }
+        #ifdef USE_EXTERNAL_ADC
+        if(mode == 1){
+            if (trigger_edge == 1) {
+                // Configure for positive edge detection
+                ESP_ERROR_CHECK(
+                    pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD));
+            } else {
+                // Configure for negative edge detection
+                ESP_ERROR_CHECK(
+                    pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
+            }
+        }
+        #endif
     }
 
     // Obtener porcentaje de trigger

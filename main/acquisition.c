@@ -23,6 +23,8 @@ const uint32_t spi_matrix[MATRIX_SPI_ROWS][MATRIX_SPI_COLS] = MATRIX_SPI_FREQ;
 int spi_index = 0;
 ledc_channel_config_t ledc_channel;
 uint64_t wait_time_us;
+pcnt_unit_handle_t pcnt_unit;
+pcnt_channel_handle_t pcnt_chan;
 
 #ifdef USE_EXTERNAL_ADC
 SemaphoreHandle_t spi_mutex = NULL;
@@ -489,7 +491,7 @@ int get_samples_per_packet(void)
 int get_max_bits(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 675;
+    return 1023;
 #else
     return 1023;
 #endif
@@ -499,7 +501,7 @@ int get_mid_bits(void)
 {
     // get_mid_bits debe ser siempre mayor que la mitad de get_max_bits
 #ifdef USE_EXTERNAL_ADC
-    return 338;
+    return 512;
 #else
     return 512;
 #endif

@@ -17,7 +17,16 @@
     "mcpwm_timer.h": "c",
     "spi_master.h": "c",
     "pulse_cnt.h": "c",
-    "cstdlib": "c"
+    "cstdlib": "c",
+    "globals.h": "c",
+    "webservers.h": "c",
+    "data_transmission.h": "c",
+    "acquisition.h": "c",
+    "main.h": "c",
+    "crypto.h": "c",
+    "network.h": "c",
+    "errno.h": "c",
+    "freertos.h": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
