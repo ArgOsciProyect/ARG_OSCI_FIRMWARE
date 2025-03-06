@@ -6,7 +6,6 @@
 #include "crypto.h"
 #include "globals.h"
 
-
 static const char *TAG = "CRYPTO";
 
 // Definición de variables globales declaradas como externas en globals.h
@@ -22,7 +21,7 @@ esp_err_t init_crypto(void)
         ESP_LOGE(TAG, "Failed to create key generation semaphore");
         return ESP_FAIL;
     }
-    
+
     return ESP_OK;
 }
 
@@ -41,8 +40,8 @@ void generate_key_pair_task(void *pvParameters)
     mbedtls_ctr_drbg_init(&ctr_drbg);
 
     // Sembrar el generador de números aleatorios
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, 
-                                    (const unsigned char *)pers, strlen(pers))) != 0) {
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers,
+                                     strlen(pers))) != 0) {
         ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
         goto exit;
     } else {
@@ -59,8 +58,7 @@ void generate_key_pair_task(void *pvParameters)
 
     // Generar el par de claves RSA
     ESP_LOGI(TAG, "Starting key generation (this may take several minutes)...");
-    if ((ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), mbedtls_ctr_drbg_random, 
-                                  &ctr_drbg, KEYSIZE, 65537)) != 0) {
+    if ((ret = mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), mbedtls_ctr_drbg_random, &ctr_drbg, KEYSIZE, 65537)) != 0) {
         ESP_LOGE(TAG, "mbedtls_rsa_gen_key returned %d", ret);
         goto exit;
     } else {
@@ -112,23 +110,23 @@ int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned ch
     mbedtls_ctr_drbg_init(&ctr_drbg);
 
     // Sembrar el generador de números aleatorios
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, 
-                                    (const unsigned char *)pers, strlen(pers))) != 0) {
+    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers,
+                                     strlen(pers))) != 0) {
         ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
         goto exit;
     }
 
     // Analizar la clave privada
-    if ((ret = mbedtls_pk_parse_key(&pk, private_key, strlen((char *)private_key) + 1, 
-                                  NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+    if ((ret = mbedtls_pk_parse_key(&pk, private_key, strlen((char *)private_key) + 1, NULL, 0, mbedtls_ctr_drbg_random,
+                                    &ctr_drbg)) != 0) {
         ESP_LOGE(TAG, "mbedtls_pk_parse_key returned %d", ret);
         goto exit;
     }
 
     // Descifrar los datos
     size_t max_output_len = *output_len; // Asumir que *output_len es el tamaño del buffer
-    if ((ret = mbedtls_pk_decrypt(&pk, input, input_len, output, output_len, 
-                                max_output_len, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+    if ((ret = mbedtls_pk_decrypt(&pk, input, input_len, output, output_len, max_output_len, mbedtls_ctr_drbg_random,
+                                  &ctr_drbg)) != 0) {
         ESP_LOGE(TAG, "mbedtls_pk_decrypt returned %d", ret);
         ESP_LOGE(TAG, "output_len: %d", *output_len);
         goto exit;
@@ -139,7 +137,7 @@ exit:
     mbedtls_pk_free(&pk);
     mbedtls_entropy_free(&entropy);
     mbedtls_ctr_drbg_free(&ctr_drbg);
-    
+
     return ret;
 }
 
@@ -148,10 +146,9 @@ esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_o
     // Decodificar Base64
     unsigned char decoded[512];
     size_t decoded_len;
-    
-    int ret = mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
-                                  (unsigned char *)encrypted_base64,
-                                  strlen(encrypted_base64));
+
+    int ret = mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len, (unsigned char *)encrypted_base64,
+                                    strlen(encrypted_base64));
     if (ret != 0) {
         ESP_LOGE(TAG, "Base64 decode failed: %d", ret);
         return ESP_FAIL;
@@ -159,9 +156,7 @@ esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_o
 
     // Descifrar
     size_t decrypted_len = output_size;
-    ret = decrypt_with_private_key(decoded, decoded_len,
-                                 (unsigned char *)decrypted_output,
-                                 &decrypted_len);
+    ret = decrypt_with_private_key(decoded, decoded_len, (unsigned char *)decrypted_output, &decrypted_len);
     if (ret != 0) {
         ESP_LOGE(TAG, "Decryption failed: %d", ret);
         return ESP_FAIL;
@@ -169,16 +164,16 @@ esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_o
 
     // Asegurar terminación nula
     decrypted_output[decrypted_len] = '\0';
-    
+
     return ESP_OK;
 }
 
-unsigned char* get_public_key(void)
+unsigned char *get_public_key(void)
 {
     return public_key;
 }
 
-unsigned char* get_private_key(void)
+unsigned char *get_private_key(void)
 {
     return private_key;
 }

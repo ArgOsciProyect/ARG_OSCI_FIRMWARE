@@ -1,7 +1,7 @@
 /**
  * @file globals.h
  * @brief Global definitions and shared variables for ESP32 oscilloscope
- * 
+ *
  * Contains shared constants, configuration definitions, and extern declarations
  * for variables that need to be accessible across multiple modules.
  */
@@ -9,17 +9,19 @@
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
-#include <stdint.h>
-#include <stdatomic.h>
-#include <driver/spi_master.h>
-#include <driver/pulse_cnt.h>
-#include <driver/mcpwm_prelude.h>
+#include "esp_adc/adc_continuous.h"
 #include <driver/ledc.h>
+#include <driver/mcpwm_prelude.h>
+#include <driver/pulse_cnt.h>
+#include <driver/spi_master.h>
 #include <esp_http_server.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
-#include "esp_adc/adc_continuous.h"  // Correcto (como aparece en include.h)
+#include <stdatomic.h>
+#include <stdint.h>
+
+#define USE_EXTERNAL_ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"
@@ -29,7 +31,7 @@
 
 /* Crypto Configuration */
 #define KEYSIZE 3072
-#define KEYSIZEBITS 3072*8
+#define KEYSIZEBITS 3072 * 8
 
 /* Timer Configuration */
 #define TIMER_DIVIDER 16
@@ -40,15 +42,15 @@
 /* ADC Configuration */
 #define ADC_CHANNEL ADC_CHANNEL_5
 #define ADC_BITWIDTH ADC_WIDTH_BIT_10
-#define SAMPLE_RATE_HZ 600000  /* 600 kHz */
+#define SAMPLE_RATE_HZ 600000 /* 600 kHz */
 #define WAIT_ADC_CONV_TIME 15
 
 /* GPIO Definitions */
 #define GPIO_INPUT_PIN GPIO_NUM_11
 #define PIN_NUM_MISO 12
 #define PIN_NUM_MOSI 13
-#define PIN_NUM_CLK  14
-#define PIN_NUM_CS   15
+#define PIN_NUM_CLK 14
+#define PIN_NUM_CS 15
 #define MCPWM_GPIO 16
 #define SYNC_GPIO 17
 #define SQUARE_WAVE_GPIO GPIO_NUM_18
@@ -61,19 +63,19 @@
 #define SPI_FREQ 40000000
 #define PERIOD_TICKS 32
 #define COMPARE_VALUE 26
-#define SPI_FREQ_SCALE_FACTOR 1000/16
+#define SPI_FREQ_SCALE_FACTOR 1000 / 16
 #define MATRIX_SPI_ROWS 7
 #define MATRIX_SPI_COLS 5
 
 /* Signal Generation */
-#define SQUARE_WAVE_FREQ    1000  /* 1 KHz */
-#define SQUARE_WAVE_TIMER   LEDC_TIMER_1
+#define SQUARE_WAVE_FREQ 1000 /* 1 KHz */
+#define SQUARE_WAVE_TIMER LEDC_TIMER_1
 #define SQUARE_WAVE_CHANNEL LEDC_CHANNEL_1
 #define TRIGGER_PWM_FREQ 78125
 #define TRIGGER_PWM_TIMER LEDC_TIMER_0
 #define TRIGGER_PWM_CHANNEL LEDC_CHANNEL_0
 #define TRIGGER_PWM_RES LEDC_TIMER_10_BIT
-#define MCPWM_FREQ_HZ 2500000  /* 2.5MHz */
+#define MCPWM_FREQ_HZ 2500000 /* 2.5MHz */
 
 /* Pulse Counter */
 #define PCNT_UNIT PCNT_UNIT_0
@@ -82,9 +84,9 @@
 
 /* Buffer Configuration */
 #ifdef USE_EXTERNAL_ADC
-#define BUF_SIZE 17280*4
+#define BUF_SIZE 17280 * 4
 #else
-#define BUF_SIZE 17280*3
+#define BUF_SIZE 17280 * 3
 #endif
 
 /* Heap Tracing */
@@ -125,14 +127,23 @@ extern SemaphoreHandle_t spi_mutex;
 #endif
 
 /* Define SPI matrix content */
-#define MATRIX_SPI_FREQ { \
-    {40000000, CS_CLK_TO_PWM, DELAY_NS, PERIOD_TICKS, COMPARE_VALUE}, \
-    {20000000, CS_CLK_TO_PWM-2, DELAY_NS+13, PERIOD_TICKS*2, COMPARE_VALUE*2}, \
-    {10000000, CS_CLK_TO_PWM-3, DELAY_NS+38, PERIOD_TICKS*4, COMPARE_VALUE*4}, \
-    {5000000, CS_CLK_TO_PWM-3, DELAY_NS+188, PERIOD_TICKS*8, COMPARE_VALUE*8}, \
-    {2500000, CS_CLK_TO_PWM-3, DELAY_NS+88, PERIOD_TICKS*16, COMPARE_VALUE*16}, \
-    {1250000, CS_CLK_TO_PWM-3, DELAY_NS+288, PERIOD_TICKS*32, COMPARE_VALUE*32}, \
-    {625000, CS_CLK_TO_PWM-3, DELAY_NS+788, PERIOD_TICKS*64, COMPARE_VALUE*64}  \
-}
+#define MATRIX_SPI_FREQ                                                        \
+  {                                                                            \
+    {40000000, CS_CLK_TO_PWM, DELAY_NS, PERIOD_TICKS, COMPARE_VALUE},          \
+        {20000000, CS_CLK_TO_PWM - 2, DELAY_NS + 13, PERIOD_TICKS * 2,         \
+         COMPARE_VALUE * 2},                                                   \
+        {10000000, CS_CLK_TO_PWM - 3, DELAY_NS + 38, PERIOD_TICKS * 4,         \
+         COMPARE_VALUE * 4},                                                   \
+        {5000000, CS_CLK_TO_PWM - 3, DELAY_NS + 188, PERIOD_TICKS * 8,         \
+         COMPARE_VALUE * 8},                                                   \
+        {2500000, CS_CLK_TO_PWM - 3, DELAY_NS + 88, PERIOD_TICKS * 16,         \
+         COMPARE_VALUE * 16},                                                  \
+        {1250000, CS_CLK_TO_PWM - 3, DELAY_NS + 288, PERIOD_TICKS * 32,        \
+         COMPARE_VALUE * 32},                                                  \
+    {                                                                          \
+      625000, CS_CLK_TO_PWM - 3, DELAY_NS + 788, PERIOD_TICKS * 64,            \
+          COMPARE_VALUE * 64                                                   \
+    }                                                                          \
+  }
 
 #endif /* GLOBALS_H */

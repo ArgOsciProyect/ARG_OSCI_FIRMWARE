@@ -1,6 +1,7 @@
 /**
  * @file network.c
- * @brief Implementation of network and WiFi functionality for ESP32 oscilloscope
+ * @brief Implementation of network and WiFi functionality for ESP32
+ * oscilloscope
  */
 
 #include "network.h"
@@ -11,7 +12,7 @@ static const char *TAG = "NETWORK";
 void wifi_init(void)
 {
     ESP_LOGI(TAG, "Initializing WiFi in AP+STA mode");
-    
+
     // Create default AP netif if it doesn't exist
     esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     if (ap_netif == NULL) {
@@ -30,13 +31,11 @@ void wifi_init(void)
 
     // Configure access point settings
     wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = WIFI_SSID,
-            .ssid_len = strlen(WIFI_SSID),
-            .password = WIFI_PASSWORD,
-            .max_connection = MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK
-        },
+        .ap = {.ssid = WIFI_SSID,
+               .ssid_len = strlen(WIFI_SSID),
+               .password = WIFI_PASSWORD,
+               .max_connection = MAX_STA_CONN,
+               .authmode = WIFI_AUTH_WPA_WPA2_PSK},
     };
 
     // Set open authentication if no password provided
@@ -48,7 +47,7 @@ void wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    
+
     ESP_LOGI(TAG, "WiFi initialized successfully, SSID: %s", WIFI_SSID);
 }
 
@@ -102,41 +101,40 @@ esp_err_t safe_close(int sock)
 esp_err_t get_ap_ip_info(esp_netif_ip_info_t *ip_info)
 {
     ESP_LOGI(TAG, "Getting AP IP info");
-    
+
     // Get AP interface IP information
     esp_err_t ret = esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"), ip_info);
-    
+
     if (ret != ESP_OK || ip_info->ip.addr == 0) {
         ESP_LOGE(TAG, "Failed to get IP address of AP");
         return ESP_FAIL;
     }
-    
+
     char ip_str[16];
     esp_ip4addr_ntoa(&ip_info->ip, ip_str, sizeof(ip_str));
     ESP_LOGI(TAG, "AP IP address: %s", ip_str);
-    
+
     return ESP_OK;
 }
 
 esp_err_t wait_for_ip(esp_netif_ip_info_t *ip_info)
 {
     ESP_LOGI(TAG, "Waiting for IP address assignment in STA mode");
-    
+
     // Poll for IP address with timeout
     for (int i = 0; i < 10; i++) {
-        ESP_LOGI(TAG, "Waiting for IP address... attempt %d/10", i+1);
+        ESP_LOGI(TAG, "Waiting for IP address... attempt %d/10", i + 1);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
-        
-        if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), ip_info) == ESP_OK && 
+
+        if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), ip_info) == ESP_OK &&
             ip_info->ip.addr != 0) {
-            
             char ip_str[16];
             esp_ip4addr_ntoa(&ip_info->ip, ip_str, sizeof(ip_str));
             ESP_LOGI(TAG, "IP address obtained: %s", ip_str);
             return ESP_OK;
         }
     }
-    
+
     ESP_LOGE(TAG, "Failed to get IP address (timeout)");
     return ESP_FAIL;
 }
@@ -144,7 +142,7 @@ esp_err_t wait_for_ip(esp_netif_ip_info_t *ip_info)
 esp_err_t create_socket_and_bind(esp_netif_ip_info_t *ip_info)
 {
     ESP_LOGI(TAG, "Creating and binding socket");
-    
+
     // Create socket
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (sock < 0) {
@@ -192,14 +190,15 @@ void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record)
     // Check if this SSID is already in the array
     bool ssid_exists = false;
     cJSON *item;
-    cJSON_ArrayForEach(item, root) {
+    cJSON_ArrayForEach(item, root)
+    {
         cJSON *ssid = cJSON_GetObjectItem(item, "SSID");
         if (ssid && strcmp(ssid->valuestring, (char *)ap_record->ssid) == 0) {
             ssid_exists = true;
             break;
         }
     }
-    
+
     // Add if SSID is not empty and not already in the array
     if (!ssid_exists && strlen((char *)ap_record->ssid) > 0) {
         item = cJSON_CreateObject();
@@ -208,35 +207,30 @@ void add_unique_ssid(cJSON *root, wifi_ap_record_t *ap_record)
     }
 }
 
-cJSON* scan_and_get_ap_records(uint16_t *num_networks)
+cJSON *scan_and_get_ap_records(uint16_t *num_networks)
 {
     ESP_LOGI(TAG, "Scanning for WiFi networks");
-    
+
     // Configure scan parameters
-    wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true
-    };
-    
+    wifi_scan_config_t scan_config = {.ssid = NULL, .bssid = NULL, .channel = 0, .show_hidden = true};
+
     // Start WiFi scan
     ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
-    
+
     // Get number of networks found
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(num_networks));
     ESP_LOGI(TAG, "Found %d networks", *num_networks);
-    
+
     // Allocate memory for scan results
     wifi_ap_record_t *ap_records = malloc(sizeof(wifi_ap_record_t) * (*num_networks));
     if (!ap_records) {
         ESP_LOGE(TAG, "Failed to allocate memory for AP records");
         return NULL;
     }
-    
+
     // Get scan results
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(num_networks, ap_records));
-    
+
     // Create JSON array for unique SSIDs
     cJSON *root = cJSON_CreateArray();
     if (root == NULL) {
@@ -244,14 +238,14 @@ cJSON* scan_and_get_ap_records(uint16_t *num_networks)
         free(ap_records);
         return NULL;
     }
-    
+
     // Add unique SSIDs to JSON array
     for (int i = 0; i < *num_networks; i++) {
         add_unique_ssid(root, &ap_records[i]);
     }
-    
+
     // Clean up
     free(ap_records);
-    
+
     return root;
 }
