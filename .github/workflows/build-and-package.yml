@@ -23,11 +23,12 @@ jobs:
       - name: List project files
         run: |
           dir
+          dir installer
           
       - name: Build with PyInstaller
         run: |
-          # Use the actual name of your Python script file
-          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer main.py
+          # Use the correct path to the installer script
+          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer/installer.py
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -63,11 +64,12 @@ jobs:
       - name: List project files
         run: |
           ls -la
+          ls -la installer
           
       - name: Build with PyInstaller
         run: |
-          # Use the actual name of your Python script file
-          pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer main.py
+          # Use the correct path to the installer script
+          pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer installer/installer.py
           
       - name: Create AppDir structure
         run: |
@@ -160,4 +162,3 @@ jobs:
               --data-binary @dist/linux-appimage/ARG_OSCI_Installer-x86_64.AppImage \
               "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/${{ github.event.release.id }}/assets?name=ARG_OSCI_Installer-x86_64.AppImage"
           fi
-          
