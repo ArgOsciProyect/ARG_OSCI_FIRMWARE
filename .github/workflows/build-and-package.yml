@@ -20,15 +20,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller requests pyserial
           
-      - name: List project files
-        run: |
-          dir
-          dir installer
-          
       - name: Build with PyInstaller
         run: |
-          # Use the correct path to the installer script
-          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer/installer.py
+          # Use the correct path and ICO file for Windows
+          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.ico --name ARG_OSCI_Installer installer/installer.py
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -61,11 +56,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fuse libfuse2 
           
-      - name: List project files
-        run: |
-          ls -la
-          ls -la installer
-          
       - name: Build with PyInstaller
         run: |
           # Use the correct path to the installer script
@@ -76,20 +66,50 @@ jobs:
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/metainfo
           
           # Copy executable to AppDir
           cp dist/ARG_OSCI_Installer AppDir/usr/bin/
+          chmod +x AppDir/usr/bin/ARG_OSCI_Installer
           
           # Create desktop entry
-          echo "[Desktop Entry]
+          cat > AppDir/usr/share/applications/ARG_OSCI_Installer.desktop << EOF
+          [Desktop Entry]
+          Type=Application
           Name=ARG_OSCI Installer
+          Comment=Firmware installer for ARG_OSCI oscilloscope
           Exec=ARG_OSCI_Installer
           Icon=ARG_OSCI_ICON
-          Type=Application
-          Categories=Development;Electronics;" > AppDir/usr/share/applications/ARG_OSCI_Installer.desktop
+          Categories=Development;Electronics;
+          Terminal=false
+          EOF
           
           # Copy icon
           cp ARG_OSCI_ICON.png AppDir/usr/share/icons/hicolor/256x256/apps/ARG_OSCI_ICON.png
+          
+          # Create AppStream metadata
+          cat > AppDir/usr/share/metainfo/ARG_OSCI_Installer.appdata.xml << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>ARG_OSCI_Installer</id>
+            <name>ARG_OSCI Installer</name>
+            <summary>Firmware installer for ARG_OSCI oscilloscope</summary>
+            <description>
+              <p>A tool to install firmware on the ARG_OSCI oscilloscope.</p>
+            </description>
+            <launchable type="desktop-id">ARG_OSCI_Installer.desktop</launchable>
+          </component>
+          EOF
+          
+          # Create AppRun script
+          cat > AppDir/AppRun << 'EOL'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/ARG_OSCI_Installer" "$@"
+          EOL
+          chmod +x AppDir/AppRun
           
       - name: Download AppImage tools
         run: |
@@ -98,16 +118,8 @@ jobs:
           
       - name: Build AppImage
         run: |
-          # Create AppRun script
-          cat > AppDir/AppRun << 'EOL'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          exec "$HERE/usr/bin/ARG_OSCI_Installer" "$@"
-          EOL
-          chmod +x AppDir/AppRun
-          
           # Create the AppImage
-          ./appimagetool-x86_64.AppImage AppDir ARG_OSCI_Installer-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir ARG_OSCI_Installer-x86_64.AppImage
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
