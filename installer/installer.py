@@ -175,44 +175,44 @@ class ARG_OSCI_Installer:
         self.monitor_port_combo['values'] = ports
         if ports:
             self.monitor_port_var.set(ports[0])
-    
+
     def launch_idf_monitor(self):
         """Launch IDF's built-in monitor tool in a new terminal window"""
         port = self.monitor_port_var.get()
-        
+    
         if not port:
             messagebox.showerror("Error", "Please select a serial port")
             return
-            
+    
         # Check if port exists and is accessible
         if not os.path.exists(port):
             messagebox.showerror("Port Not Found", f"Serial port {port} not found")
             return
-            
+    
         if not self.check_port_permission(port):
             return
-        
+    
         self.log(f"Launching ESP-IDF monitor on port {port}...")
-        
+    
         # Update paths from UI
         self.firmware_path = self.firmware_path_var.get()
         self.idf_path = self.idf_path_var.get()
         self.idf_tools_path = self.idf_tools_path_var.get()
-        
+    
         # Check if ESP-IDF exists
         if not os.path.exists(self.idf_path) or not os.path.isfile(
             os.path.join(self.idf_path, "export.sh" if platform.system() != "Windows" else "export.bat")
         ):
             messagebox.showerror("ESP-IDF Missing", "ESP-IDF not found. Please install it first.")
             return
-        
+    
         if not os.path.exists(self.firmware_path):
             messagebox.showerror("Firmware Missing", "Firmware path not found. Please download or build the firmware first.")
             return
-        
+    
         # Set environment variables
         os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path
-        
+    
         # Create and launch appropriate script based on platform
         if platform.system() == "Windows":
             export_script = os.path.join(self.idf_path, "export.bat")
@@ -226,12 +226,12 @@ class ARG_OSCI_Installer:
                           f'idf.py -p {port} monitor\r\n'
                           f'echo Monitor closed.\r\n'
                           f'pause\r\n'.encode())
-            
+    
             # Launch in a new cmd window
             self.log(f"Opening ESP-IDF monitor in a new terminal window")
             subprocess.Popen(f'start cmd /k "{temp_script}"', shell=True)
-            
-        else:  # Linux and macOS
+    
+        else:  # Linux
             export_script = os.path.join(self.idf_path, "export.sh")
             with tempfile.NamedTemporaryFile(mode='w+', suffix='.sh', delete=False) as temp:
                 temp_script = temp.name
@@ -244,40 +244,34 @@ class ARG_OSCI_Installer:
     echo "Monitor closed."
     read -p "Press Enter to close this window"
     ''')
-            
+    
             os.chmod(temp_script, 0o755)
-            
-            if platform.system() == "Darwin":  # macOS
-                # Use open command to launch in Terminal.app
-                self.log(f"Opening ESP-IDF monitor in a new terminal window")
-                subprocess.Popen(f'open -a Terminal {temp_script}', shell=True)
-            else:  # Linux
-                # Try to detect and use an available terminal
-                terminal_found = False
-                for terminal in ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]:
-                    if shutil.which(terminal):
-                        if terminal == "gnome-terminal":
-                            subprocess.Popen(f'{terminal} -- {temp_script}', shell=True)
-                        elif terminal == "konsole":
-                            subprocess.Popen(f'{terminal} --noclose -e {temp_script}', shell=True)
-                        elif terminal == "x-terminal-emulator":
-                            subprocess.Popen(f'{terminal} -e {temp_script}', shell=True)
-                        else:
-                            subprocess.Popen(f'{terminal} -hold -e {temp_script}', shell=True)
-                        self.log(f"Opening ESP-IDF monitor in a new {terminal} window")
-                        terminal_found = True
-                        break
+    
+            # Try to detect and use an available terminal
+            terminal_found = False
+            for terminal in ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]:
+                if shutil.which(terminal):
+                    if terminal == "gnome-terminal":
+                        subprocess.Popen(f'{terminal} -- {temp_script}', shell=True)
+                    elif terminal == "konsole":
+                        subprocess.Popen(f'{terminal} --noclose -e {temp_script}', shell=True)
+                    elif terminal == "x-terminal-emulator":
+                        subprocess.Popen(f'{terminal} -e {temp_script}', shell=True)
+                    else:
+                        subprocess.Popen(f'{terminal} -hold -e {temp_script}', shell=True)
+                    self.log(f"Opening ESP-IDF monitor in a new {terminal} window")
+                    terminal_found = True
+                    break
                     
-                if not terminal_found:
-                    messagebox.showerror("Error", "Could not find a suitable terminal emulator")
-                    os.unlink(temp_script)
-                    return
-                    
+            if not terminal_found:
+                messagebox.showerror("Error", "Could not find a suitable terminal emulator")
+                os.unlink(temp_script)
+                return
+    
         messagebox.showinfo("Monitor Launched", 
                             "ESP-IDF monitor has been launched in a separate terminal window.\n\n"
                             "Press Ctrl+] to exit when finished.")
-    
-    
+
     def select_directory(self, dir_type):
         """Open a dialog to select a directory"""
         from tkinter import filedialog
@@ -307,13 +301,14 @@ class ARG_OSCI_Installer:
         possible_locations = [
             # Environment variable locations
             *env_locations,
-            # Platform-specific common locations
-            os.path.join(home_dir, "esp", "esp-idf"),  # ~/esp/esp-idf (Linux/macOS)
-            os.path.join(home_dir, ".espressif", "esp-idf"),  # ~/.espressif/esp-idf
+            # Linux locations
+            os.path.join(home_dir, "esp", "esp-idf"),
+            os.path.join(home_dir, ".espressif", "esp-idf"),
             os.path.join("/opt", "esp", "esp-idf"),
             os.path.join("/usr", "local", "esp-idf"),
+            # Windows locations
             os.path.join("C:\\", "esp", "esp-idf"),
-            os.path.join("C:\\", "Users", username, "esp", "esp-idf"),  # C:\Users\username\esp\esp-idf
+            os.path.join("C:\\", "Users", username, "esp", "esp-idf"),
             os.path.join("C:\\", "Espressif", "frameworks", "esp-idf-v5.3.1")
         ]
             
@@ -374,7 +369,7 @@ class ARG_OSCI_Installer:
                                         "No ESP-IDF installations found in the selected directory.")
         
         messagebox.showinfo("ESP-IDF Not Found", 
-                           "No existing ESP-IDF installation found. It will be downloaded during installation.")
+                           "No existing ESP-IDF installation found. It will be downloaded during installation.")    
     
     def find_esp_idf_recursively(self, directory, max_depth=4, current_depth=0):
         """
@@ -513,9 +508,26 @@ class ARG_OSCI_Installer:
             messagebox.showerror("Installation Error", str(e))
     
     def build_firmware(self):
-        """Build the firmware using ESP-IDF with bash for Linux/Mac"""
+        """Build the firmware using ESP-IDF"""
         # Set up environment variables
         os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path
+        
+        # Clean the build directory first
+        build_dir = os.path.join(self.firmware_path, "build")
+        if os.path.exists(build_dir):
+            self.log("Cleaning previous build directory...")
+            shutil.rmtree(build_dir)
+        os.makedirs(build_dir, exist_ok=True)
+        
+        # Create the git-data directory and needed files
+        git_data_dir = os.path.join(build_dir, "CMakeFiles", "git-data")
+        os.makedirs(git_data_dir, exist_ok=True)
+        with open(os.path.join(git_data_dir, "head-ref"), 'w') as f:
+            f.write("e51aed0a38d795ed5d5ba82c4aef7791929780a5\n")
+        
+        # For Linux, fix permissions
+        if platform.system() != "Windows":
+            self.check_and_fix_esp_idf_permissions()
         
         if platform.system() == "Windows":
             export_script = os.path.join(self.idf_path, "export.bat")
@@ -528,7 +540,7 @@ class ARG_OSCI_Installer:
             os.unlink(temp_script)
         else:
             export_script = os.path.join(self.idf_path, "export.sh")
-            os.chmod(export_script, 0o755)
+            os.chmod(export_script, 0o755)  # Ensure the script is executable
             # Explicitly use bash to ensure 'source' command works
             self.execute_command(f'/bin/bash -c \'source "{export_script}" && cd "{self.firmware_path}" && idf.py build\'')
         
@@ -537,52 +549,47 @@ class ARG_OSCI_Installer:
     def check_port_permission(self, port):
         """Check if the user has permission to access the specified port"""
         if platform.system() != "Windows" and not os.access(port, os.R_OK | os.W_OK):
-            # Permission issue on Linux/Mac
-            if platform.system() == "Linux":
-                group = "dialout"  # Most common group for serial access on Linux
-                username = os.getenv("USER")
-
-                # Check if user is already in the group
-                try:
-                    groups_output = subprocess.check_output(['groups', username], text=True)
-                    if group in groups_output:
-                        self.log(f"User {username} is already in the {group} group, but still cannot access {port}")
-                        self.log("Try unplugging and reconnecting the device, or reboot to apply group changes")
-                        return False
-
-                    # Ask if user wants to add themselves to the group
-                    if messagebox.askyesno("Permission Error", 
-                                         f"Cannot access {port}. Would you like to add your user to the '{group}' group?\n"
-                                         f"This requires sudo access and you may need to log out and log back in."):
-                        try:
-                            # Use pkexec for GUI sudo prompt if available, otherwise use sudo
-                            if shutil.which("pkexec"):
-                                cmd = f"pkexec usermod -a -G {group} {username}"
-                            else:
-                                cmd = f"sudo usermod -a -G {group} {username}"
-
-                            subprocess.run(cmd, shell=True, check=True)
-                            messagebox.showinfo("Group Added", 
-                                              f"Added user {username} to the {group} group.\n"
-                                              f"You need to log out and log back in for this change to take effect.")
-                        except subprocess.CalledProcessError as e:
-                            self.log(f"Failed to add user to group: {e}")
-                            messagebox.showerror("Error", "Failed to add user to group. You may need to do this manually.")
-                            self.log(f"To fix manually, run: sudo usermod -a -G {group} {username}")
-                        return False
-                    else:
-                        return False
-                except Exception as e:
-                    self.log(f"Error checking group membership: {e}")
+            # Permission issue on Linux
+            group = "dialout"  # Most common group for serial access on Linux
+            username = os.getenv("USER")
+    
+            # Check if user is already in the group
+            try:
+                groups_output = subprocess.check_output(['groups', username], text=True)
+                if group in groups_output:
+                    self.log(f"User {username} is already in the {group} group, but still cannot access {port}")
+                    self.log("Try unplugging and reconnecting the device, or reboot to apply group changes")
                     return False
-            else:  # macOS
-                self.log(f"Permission denied for port {port}")
-                messagebox.showerror("Permission Error", f"Cannot access {port}. Check permissions for this device.")
+    
+                # Ask if user wants to add themselves to the group
+                if messagebox.askyesno("Permission Error", 
+                                     f"Cannot access {port}. Would you like to add your user to the '{group}' group?\n"
+                                     f"This requires sudo access and you may need to log out and log back in."):
+                    try:
+                        # Use pkexec for GUI sudo prompt if available, otherwise use sudo
+                        if shutil.which("pkexec"):
+                            cmd = f"pkexec usermod -a -G {group} {username}"
+                        else:
+                            cmd = f"sudo usermod -a -G {group} {username}"
+    
+                        subprocess.run(cmd, shell=True, check=True)
+                        messagebox.showinfo("Group Added", 
+                                          f"Added user {username} to the {group} group.\n"
+                                          f"You need to log out and log back in for this change to take effect.")
+                    except subprocess.CalledProcessError as e:
+                        self.log(f"Failed to add user to group: {e}")
+                        messagebox.showerror("Error", "Failed to add user to group. You may need to do this manually.")
+                        self.log(f"To fix manually, run: sudo usermod -a -G {group} {username}")
+                    return False
+                else:
+                    return False
+            except Exception as e:
+                self.log(f"Error checking group membership: {e}")
                 return False
         return True
-
+    
     def flash_firmware(self):
-        """Flash the firmware to the ESP32 with bash for Linux/Mac"""
+        """Flash the firmware to the ESP32"""
         port = self.port_var.get()
         
         # Check port permissions first
@@ -590,13 +597,17 @@ class ARG_OSCI_Installer:
             self.log(f"Error: Port {port} doesn't exist. Make sure the device is connected.")
             messagebox.showerror("Port Not Found", f"Serial port {port} not found. Please check your connection and refresh ports.")
             return False
-            
+                
         if not self.check_port_permission(port):
             self.log(f"Cannot access port {port} due to permission issues. Please fix permissions and try again.")
             return False
         
         try:
             os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path
+            
+            # Fix permissions for Linux
+            if platform.system() != "Windows":
+                self.check_and_fix_esp_idf_permissions()
             
             if platform.system() == "Windows":
                 export_script = os.path.join(self.idf_path, "export.bat")
@@ -617,8 +628,8 @@ class ARG_OSCI_Installer:
             return True
         except Exception as e:
             self.log(f"Flash failed: {str(e)}")
-            return False
-    
+            return False        
+        
     def refresh_ports(self):
         """Find available serial ports and update the combobox"""
         ports = self.get_serial_ports()
@@ -631,12 +642,9 @@ class ARG_OSCI_Installer:
         if platform.system() == "Windows":
             from serial.tools import list_ports
             return [port.device for port in list_ports.comports()]
-        else:
+        else:  # Linux
             import glob
-            if platform.system() == "Darwin":  # macOS
-                return glob.glob('/dev/tty.*') + glob.glob('/dev/cu.*')
-            else:  # Linux
-                return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+            return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
     
     def log(self, message):
         """Add a message to the status text widget"""
@@ -704,32 +712,28 @@ class ARG_OSCI_Installer:
         
         # Download ESP-IDF
         self.log("Downloading ESP-IDF v5.3.1...")
-        esp_idf_url = "https://github.com/espressif/esp-idf/archive/refs/tags/v5.3.1.zip"
-        response = requests.get(esp_idf_url, stream=True)
-        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
-            zip_file.extractall(self.temp_dir)
-            
-            # Find the extracted directory
-            extracted_dirs = [d for d in os.listdir(self.temp_dir) 
-                             if os.path.isdir(os.path.join(self.temp_dir, d)) and 
-                             d.startswith("esp-idf")]
-            
-            if extracted_dirs:
-                # Move the contents to the ESP-IDF directory
-                extracted_dir = os.path.join(self.temp_dir, extracted_dirs[0])
-                
-                # Copy all contents to the ESP-IDF path
-                for item in os.listdir(extracted_dir):
-                    s = os.path.join(extracted_dir, item)
-                    d = os.path.join(self.idf_path, item)
-                    if os.path.isdir(s):
-                        shutil.copytree(s, d)
-                    else:
-                        shutil.copy2(s, d)
-                
-                self.log(f"ESP-IDF extracted to {self.idf_path}")
-            else:
-                raise Exception("Failed to extract ESP-IDF")
+        
+        # Instead of downloading a ZIP, let's clone the git repository with submodules
+        self.log("Cloning ESP-IDF repository with submodules...")
+        
+        # First, check if git is available
+        if not shutil.which("git"):
+            self.log("Git is not installed. Please install git and try again.")
+            raise Exception("Git is not installed. Please install git and try again.")
+        
+        # Remove existing ESP-IDF directory if it exists
+        if os.path.exists(self.idf_path):
+            shutil.rmtree(self.idf_path)
+        
+        # Clone the repo with submodules
+        self.log("Cloning ESP-IDF repository (this may take a while)...")
+        self.execute_command(f'git clone -b v5.3.1 --recursive https://github.com/espressif/esp-idf.git "{self.idf_path}"')
+        
+        self.log("ESP-IDF repository cloned successfully with all submodules")
+        
+        # Fix permissions if needed
+        if platform.system() != "Windows":
+            self.check_and_fix_esp_idf_permissions()
         
         # Install ESP-IDF dependencies
         self.log("Installing ESP-IDF dependencies...")
@@ -745,7 +749,7 @@ class ARG_OSCI_Installer:
         # Run the install script
         self.execute_command(install_script)
         self.log("ESP-IDF dependencies installed")
-    
+
     def configure_firmware(self):
         """Configure the firmware based on user settings"""
         globals_h_path = os.path.join(self.firmware_path, "main", "globals.h")
@@ -895,7 +899,9 @@ class ARG_OSCI_Installer:
         import serial
         
         port = self.monitor_port_var.get()
-        baud = int(self.baud_var.get())
+        
+        # Use a default baud rate since baud_var is not defined in the UI setup
+        baud = 115200  # Standard baud rate for ESP32
         
         if not port:
             messagebox.showerror("Error", "Please select a serial port")
@@ -986,7 +992,41 @@ class ARG_OSCI_Installer:
                 f.write(self.monitor_text.get(1.0, tk.END))
             self.monitor_text.insert(tk.END, f"\nLog saved to {file_path}\n")
 
+    def check_and_fix_esp_idf_permissions(self):
+        """Check and fix permissions on ESP-IDF tools"""
+        if platform.system() != "Windows":
+            self.log("Checking ESP-IDF tool permissions...")
+            try:
+                # Make sure idf.py has execute permission
+                idf_py_path = os.path.join(self.idf_path, "tools", "idf.py")
+                if os.path.exists(idf_py_path):
+                    os.chmod(idf_py_path, 0o755)
+                
+                # Make all scripts in the tools directory executable
+                tools_dir = os.path.join(self.idf_path, "tools")
+                if os.path.exists(tools_dir):
+                    for root, dirs, files in os.walk(tools_dir):
+                        for file in files:
+                            if file.endswith(".py") or file.endswith(".sh"):
+                                file_path = os.path.join(root, file)
+                                os.chmod(file_path, 0o755)
+                
+                # Fix permissions on key scripts
+                for script in ["export.sh", "install.sh"]:
+                    script_path = os.path.join(self.idf_path, script)
+                    if os.path.exists(script_path):
+                        os.chmod(script_path, 0o755)
+                
+                self.log("ESP-IDF permissions fixed")
+                
+            except Exception as e:
+                self.log(f"Warning: Could not set permissions: {str(e)}")
+                return False
+                
+            return True
+        
 def main():
+    # Create the main window
     root = tk.Tk()
     app = ARG_OSCI_Installer(root)
     root.mainloop()
