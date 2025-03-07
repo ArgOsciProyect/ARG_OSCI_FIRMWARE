@@ -9,9 +9,9 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
@@ -20,9 +20,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller requests pyserial
           
+      - name: List project files
+        run: |
+          dir
+          
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer.py
+          # Use the actual name of your Python script file
+          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer main.py
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -39,9 +44,9 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
@@ -55,9 +60,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fuse libfuse2 
           
+      - name: List project files
+        run: |
+          ls -la
+          
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer installer.py
+          # Use the actual name of your Python script file
+          pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer main.py
           
       - name: Create AppDir structure
         run: |
@@ -150,3 +160,4 @@ jobs:
               --data-binary @dist/linux-appimage/ARG_OSCI_Installer-x86_64.AppImage \
               "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/${{ github.event.release.id }}/assets?name=ARG_OSCI_Installer-x86_64.AppImage"
           fi
+          
