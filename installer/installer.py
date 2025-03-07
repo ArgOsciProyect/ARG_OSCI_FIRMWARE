@@ -489,7 +489,7 @@ class ARG_OSCI_Installer:
             # Build firmware
             self.progress["value"] = 70
             self.log("Building firmware...")
-            self.build_firmware()
+            self.build_firmware(clean_build=True)
             
             # Flash firmware
             self.progress["value"] = 90
@@ -507,28 +507,31 @@ class ARG_OSCI_Installer:
             self.log(f"Error: {str(e)}")
             messagebox.showerror("Installation Error", str(e))
     
-    def build_firmware(self):
+    def build_firmware(self, clean_build=False):
         """Build the firmware using ESP-IDF"""
         # Set up environment variables
         os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path
-        
-        # Clean the build directory first
+
+        # Only clean the build directory when doing a full installation
         build_dir = os.path.join(self.firmware_path, "build")
-        if os.path.exists(build_dir):
+        if clean_build and os.path.exists(build_dir):
             self.log("Cleaning previous build directory...")
             shutil.rmtree(build_dir)
-        os.makedirs(build_dir, exist_ok=True)
-        
-        # Create the git-data directory and needed files
+            os.makedirs(build_dir, exist_ok=True)
+        elif not os.path.exists(build_dir):
+            os.makedirs(build_dir, exist_ok=True)
+
+        # Create the git-data directory and needed files if they don't exist
         git_data_dir = os.path.join(build_dir, "CMakeFiles", "git-data")
-        os.makedirs(git_data_dir, exist_ok=True)
-        with open(os.path.join(git_data_dir, "head-ref"), 'w') as f:
-            f.write("e51aed0a38d795ed5d5ba82c4aef7791929780a5\n")
-        
+        if not os.path.exists(git_data_dir):
+            os.makedirs(git_data_dir, exist_ok=True)
+            with open(os.path.join(git_data_dir, "head-ref"), 'w') as f:
+                f.write("e51aed0a38d795ed5d5ba82c4aef7791929780a5\n")
+
         # For Linux, fix permissions
         if platform.system() != "Windows":
             self.check_and_fix_esp_idf_permissions()
-        
+
         if platform.system() == "Windows":
             export_script = os.path.join(self.idf_path, "export.bat")
             # Create a temporary batch file to source export.bat and then run the build command
@@ -869,7 +872,7 @@ class ARG_OSCI_Installer:
             # Build firmware
             self.progress["value"] = 50
             self.log("Building firmware...")
-            self.build_firmware()
+            self.build_firmware(clean_build=False)
             
             # Flash firmware
             self.progress["value"] = 80
