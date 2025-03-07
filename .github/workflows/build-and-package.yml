@@ -18,12 +18,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller requests pyserial
+          pip install pyinstaller requests pyserial pillow
           
       - name: Build with PyInstaller
         run: |
-          # Use the correct path and ICO file for Windows
-          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.ico --name ARG_OSCI_Installer installer/installer.py
+          # Use PNG instead of ICO since Pillow will convert it
+          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer/installer.py
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -84,8 +84,13 @@ jobs:
           Terminal=false
           EOF
           
+          # Also put the desktop file in the root of AppDir (required)
+          cp AppDir/usr/share/applications/ARG_OSCI_Installer.desktop AppDir/
+          
           # Copy icon
           cp ARG_OSCI_ICON.png AppDir/usr/share/icons/hicolor/256x256/apps/ARG_OSCI_ICON.png
+          # Also copy icon to root of AppDir
+          cp ARG_OSCI_ICON.png AppDir/ARG_OSCI_ICON.png
           
           # Create AppStream metadata
           cat > AppDir/usr/share/metainfo/ARG_OSCI_Installer.appdata.xml << EOF
@@ -111,6 +116,9 @@ jobs:
           EOL
           chmod +x AppDir/AppRun
           
+          # List contents of AppDir for debugging
+          find AppDir -type f | sort
+          
       - name: Download AppImage tools
         run: |
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -118,8 +126,8 @@ jobs:
           
       - name: Build AppImage
         run: |
-          # Create the AppImage
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir ARG_OSCI_Installer-x86_64.AppImage
+          # Create the AppImage with verbose output
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage -v AppDir ARG_OSCI_Installer-x86_64.AppImage
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
