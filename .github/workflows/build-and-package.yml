@@ -25,7 +25,7 @@ jobs:
           pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer.py
           
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows-exe
           path: dist/ARG_OSCI_Installer.exe
@@ -98,7 +98,7 @@ jobs:
           ./appimagetool-x86_64.AppImage AppDir ARG_OSCI_Installer-x86_64.AppImage
           
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
           path: ARG_OSCI_Installer-x86_64.AppImage
@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: dist
           
