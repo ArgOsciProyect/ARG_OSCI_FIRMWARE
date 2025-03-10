@@ -130,8 +130,24 @@ class ARG_OSCI_Installer:
         self.root.title("ARG_OSCI Firmware Installer")
         self.root.geometry("800x600")
         
-        # Use the directory where the script is running instead of temp dir
-        self.base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        # Use user home directory instead of script location
+        script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        user_home = os.path.expanduser("~")
+        
+        # Create an ARG_OSCI directory in user's home
+        self.base_dir = os.path.join(user_home, "ARG_OSCI")
+        
+        # Check if we're running from read-only location (like AppImage)
+        try:
+            test_file = os.path.join(script_dir, ".write_test")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            # If we get here, script_dir is writable
+            self.base_dir = script_dir
+        except (IOError, OSError):
+            # script_dir is not writable, use home directory
+            print(f"Using {self.base_dir} for installation files")
         
         # Initialize default paths
         self.firmware_path = os.path.join(self.base_dir, "firmware")
@@ -139,6 +155,7 @@ class ARG_OSCI_Installer:
         self.idf_tools_path = os.path.join(self.base_dir, "esp-idf-tools")
         
         # Create directories if they don't exist
+        os.makedirs(self.base_dir, exist_ok=True)
         os.makedirs(self.firmware_path, exist_ok=True)
         os.makedirs(self.idf_path, exist_ok=True)
         os.makedirs(self.idf_tools_path, exist_ok=True)
