@@ -85,14 +85,15 @@ For external ADC configuration, modify the SPI parameters in the `spi_matrix` de
 ### Troubleshooting
 
 If you encounter connection issues:
-- Ensure the ESP32 is powered and operational (blue LED should be on)
+- Ensure the ESP32 is powered and operational (The LED should be on)
 - Verify you're connected to the "ESP32_AP" WiFi network
 - Check serial output for error messages using `idf.py monitor`
 
 For acquisition problems:
-- Make sure input signal is within the acceptable voltage range (0-3.3V)
+- Make sure input signal is within the acceptable voltage range
 - Try adjusting the trigger level if using single mode
-- Reduce sampling rate for more stable operation
+- Reduce or increase sampling rate for more stable operation
+- Disable/enable the hysteresis or the 50Khz filter applied to the trigger
 
 ## For Contributors
 

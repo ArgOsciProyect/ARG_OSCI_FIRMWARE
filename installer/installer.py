@@ -129,40 +129,55 @@ class ARG_OSCI_Installer:
         self.root = root
         self.root.title("ARG_OSCI Firmware Installer")
         self.root.geometry("800x600")
-        
-        # Use user home directory instead of script location
+
+        # Detect if running from a temporary filesystem (AppImage)
         script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         user_home = os.path.expanduser("~")
-        
-        # Create an ARG_OSCI directory in user's home
-        self.base_dir = os.path.join(user_home, "ARG_OSCI")
-        
-        # Check if we're running from read-only location (like AppImage)
+        self.is_appimage = False
+
+        # Check if we're running from AppImage
+        if "/tmp/.mount_" in script_dir or "/tmp/appimage" in script_dir:
+            self.is_appimage = True
+            self.log(f"Running from AppImage detected: {script_dir}")
+            # When running from AppImage, always use HOME directory
+            self.base_dir = os.path.join(user_home, "ARG_OSCI")
+        else:
+            # Not AppImage, try to use script directory if writable
+            self.base_dir = os.path.join(user_home, "ARG_OSCI")  # Default
+            try:
+                test_file = os.path.join(script_dir, ".write_test")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.remove(test_file)
+                # If we get here, script_dir is writable
+                self.base_dir = script_dir
+            except (IOError, OSError):
+                # script_dir is not writable, use home directory
+                self.log(f"Script directory not writable, using {self.base_dir}")
+
+        # Create directories if they don't exist
         try:
-            test_file = os.path.join(script_dir, ".write_test")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.remove(test_file)
-            # If we get here, script_dir is writable
-            self.base_dir = script_dir
-        except (IOError, OSError):
-            # script_dir is not writable, use home directory
-            print(f"Using {self.base_dir} for installation files")
-        
+            os.makedirs(self.base_dir, exist_ok=True)
+        except Exception as e:
+            self.log(f"Warning: Could not create base directory: {e}")
+            # Emergency fallback if we can't write to chosen location
+            self.base_dir = os.path.join(tempfile.gettempdir(), "ARG_OSCI")
+            self.log(f"Using temporary directory as fallback: {self.base_dir}")
+            os.makedirs(self.base_dir, exist_ok=True)
+
         # Initialize default paths
         self.firmware_path = os.path.join(self.base_dir, "firmware")
         self.idf_path = os.path.join(self.base_dir, "esp-idf")
         self.idf_tools_path = os.path.join(self.base_dir, "esp-idf-tools")
-        
+
         # Create directories if they don't exist
-        os.makedirs(self.base_dir, exist_ok=True)
         os.makedirs(self.firmware_path, exist_ok=True)
         os.makedirs(self.idf_path, exist_ok=True)
         os.makedirs(self.idf_tools_path, exist_ok=True)
-        
-        # Load saved configuration
+
+        # Setup UI before loading configuration
         self.setup_ui()
-        
+
         # After UI is set up, load configuration
         config = self.load_config()
         
@@ -194,6 +209,20 @@ class ARG_OSCI_Installer:
                 self.serial_port.close()
         except Exception as e:
             print(f"Error cleaning up resources: {str(e)}")
+
+    def log(self, message):
+        """Add a message to the status text widget"""
+        try:
+            # Check if the status_text widget exists and is ready
+            if hasattr(self, 'status_text') and self.status_text.winfo_exists():
+                self.status_text.insert(tk.END, message + "\n")
+                self.status_text.see(tk.END)
+                # Update UI
+                if hasattr(self, 'root') and self.root.winfo_exists():
+                    self.root.update_idletasks()
+        except Exception:
+            # Fallback to print if UI not ready or any error occurs
+            print(message)
 
     def setup_ui(self):
         # Create tabs
@@ -365,42 +394,10 @@ class ARG_OSCI_Installer:
         # Destroy the window
         self.root.destroy()
 
-    def load_config(self):
-        """Load configuration from a file"""
-        config_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "arg_osci_installer.cfg")
-        config = {
-            "ssid": "ESP32_AP",
-            "password": "password123",
-            "adc_mode": "internal",
-            "firmware_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "firmware"),
-            "idf_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "esp-idf"),
-            "idf_tools_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "esp-idf-tools"),
-            "port": ""
-        }
-
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r') as f:
-                    saved_config = {}
-                    for line in f:
-                        if '=' in line:
-                            key, value = line.strip().split('=', 1)
-                            saved_config[key] = value
-
-                    # Update default config with saved values
-                    for key in config:
-                        if key in saved_config:
-                            config[key] = saved_config[key]
-
-                self.log("Configuration loaded from file")
-            except Exception as e:
-                self.log(f"Error loading configuration: {e}")
-
-        return config
-    
     def save_config(self):
         """Save current configuration to a file"""
-        config_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "arg_osci_installer.cfg")
+        # Use self.base_dir instead of script directory for better AppImage compatibility
+        config_file = os.path.join(self.base_dir, "arg_osci_installer.cfg")
         
         try:
             with open(config_file, 'w') as f:
@@ -415,7 +412,72 @@ class ARG_OSCI_Installer:
             self.log("Configuration saved to file")
         except Exception as e:
             self.log(f"Error saving configuration: {e}")
-
+            # No need to show error dialog for config save failures
+            # Just log it and continue
+    
+    def load_config(self):
+        """Load configuration from a file"""
+        # First try to load from self.base_dir
+        config_file = os.path.join(self.base_dir, "arg_osci_installer.cfg")
+        
+        # Default configuration
+        config = {
+            "ssid": "ESP32_AP",
+            "password": "password123",
+            "adc_mode": "internal",
+            "firmware_path": os.path.join(self.base_dir, "firmware"),
+            "idf_path": os.path.join(self.base_dir, "esp-idf"),
+            "idf_tools_path": os.path.join(self.base_dir, "esp-idf-tools"),
+            "port": ""
+        }
+    
+        # Try the config file in the new location first
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r') as f:
+                    saved_config = {}
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            saved_config[key] = value
+    
+                    # Update default config with saved values
+                    for key in config:
+                        if key in saved_config:
+                            config[key] = saved_config[key]
+    
+                self.log("Configuration loaded from file")
+                return config
+            except Exception as e:
+                self.log(f"Error loading configuration from {config_file}: {e}")
+        
+        # Fall back to script directory if base_dir config doesn't exist
+        script_dir_config = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "arg_osci_installer.cfg")
+        if os.path.exists(script_dir_config) and script_dir_config != config_file:
+            try:
+                with open(script_dir_config, 'r') as f:
+                    saved_config = {}
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            saved_config[key] = value
+    
+                    # Update default config with saved values
+                    for key in config:
+                        if key in saved_config:
+                            config[key] = saved_config[key]
+    
+                self.log(f"Configuration loaded from legacy location: {script_dir_config}")
+                # Save to the new location for future use
+                self.log("Migrating configuration to new location...")
+                
+                # Don't attempt to save here as config isn't fully initialized yet
+                # Just return the loaded config
+            except Exception as e:
+                self.log(f"Error loading legacy configuration: {e}")
+    
+        return config
+    
     def refresh_monitor_ports(self):
         """Refresh the monitor serial ports"""
         ports = self.get_serial_ports()
