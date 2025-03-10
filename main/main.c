@@ -81,7 +81,11 @@ void app_main(void)
 
     // Configurar pin GPIO para entrada de trigger
     configure_gpio();
-    ESP_LOGI(TAG, "GPIO pins configured");
+    ESP_LOGI(TAG, "TRIGGER GPIO pins configured");
+
+    // Configurar pin GPIO para LED de estado
+    configure_led_gpio();
+    ESP_LOGI(TAG, "LED GPIO configured");
 
     // Inicializar WiFi en modo AP+STA
     wifi_init();
@@ -105,6 +109,9 @@ void app_main(void)
 #else
     xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
 #endif
+
+    // Activar LED para indicar que el socket está listo para conexiones
+    gpio_set_level(LED_GPIO, 1);
     ESP_LOGI(TAG, "Socket task created on core 1");
 
     // Iniciar tarea de monitoreo de memoria (opcional, comentada por defecto)
