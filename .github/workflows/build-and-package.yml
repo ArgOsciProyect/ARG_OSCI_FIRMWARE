@@ -53,7 +53,7 @@ jobs:
                     StringStruct(u"LegalCopyright", u"© 2025 ARG_OSCI Project"),
                     StringStruct(u"OriginalFilename", u"ARG_OSCI_Installer.exe"),
                     StringStruct(u"ProductName", u"ARG_OSCI Firmware Installer"),
-                    StringStruct(u"ProductVersion", u"0.1.3")])
+                    StringStruct(u"ProductVersion", u"0.2.1")])
                 ]
               ),
               VarFileInfo([VarStruct(u"Translation", [0x0409, 1200])])
@@ -153,67 +153,18 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller requests pyserial
+          pip install pyinstaller requests pyserial pillow
           
       - name: Install AppImage tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y fuse libfuse2 
+          sudo apt-get install -y fuse libfuse2 desktop-file-utils
           
       - name: Build with PyInstaller
         run: |
-          # Use the correct path to the installer script
+          # Create a single binary with icon
           pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer installer/installer.py
           
-          # Modify the binary to minimize GLIBC requirements
-          # Create a wrapper script that will try the AppImage first, and if it fails, use system Python
-          echo '#!/bin/sh
-          SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-          
-          # First try running the bundled app
-          "$SCRIPT_DIR/ARG_OSCI_Installer.bin" "$@"
-          
-          # If it failed with GLIBC error, try with system Python
-          if [ $? -eq 127 ] || [ $? -eq 1 ]; then
-              echo "Attempting to run with system Python..."
-              if command -v python3 >/dev/null 2>&1; then
-                  # Extract the installer script to a temporary file
-                  TEMP_DIR=$(mktemp -d)
-                  cp "$SCRIPT_DIR/ARG_OSCI_ICON.png" "$TEMP_DIR/"
-                  
-                  # Get the installer script from GitHub if possible
-                  if command -v curl >/dev/null 2>&1; then
-                      curl -s https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py > "$TEMP_DIR/installer.py"
-                  elif command -v wget >/dev/null 2>&1; then
-                      wget -q -O "$TEMP_DIR/installer.py" https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py
-                  else
-                      echo "Error: No se pudo descargar el instalador. Por favor, instale curl o wget."
-                      exit 1
-                  fi
-                  
-                  # Run with system Python
-                  cd "$TEMP_DIR" && python3 installer.py
-                  exit_code=$?
-                  
-                  # Clean up
-                  rm -rf "$TEMP_DIR"
-                  exit $exit_code
-              else
-                  echo "Error: Python3 no está instalado en este sistema."
-                  exit 1
-              fi
-          fi
-          ' > dist/ARG_OSCI_Installer_wrapper
-          
-          # Make wrapper executable
-          chmod +x dist/ARG_OSCI_Installer_wrapper
-          
-          # Rename original binary
-          mv dist/ARG_OSCI_Installer dist/ARG_OSCI_Installer.bin
-          
-          # Replace with wrapper
-          mv dist/ARG_OSCI_Installer_wrapper dist/ARG_OSCI_Installer  
-                  
       - name: Create AppDir structure
         run: |
           # Set app name for consistency
@@ -229,14 +180,17 @@ jobs:
           # Copy icon
           cp ARG_OSCI_ICON.png AppDir/usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png
           
-          # Create desktop file (must be named exactly as the app)
+          # Copy icon to bin directory for the app to find
+          cp ARG_OSCI_ICON.png AppDir/usr/bin/
+          
+          # Create desktop file
           cat > AppDir/${APP_NAME}.desktop << EOF
           [Desktop Entry]
           Type=Application
           Name=ARG_OSCI Installer
           Comment=Firmware installer for ARG_OSCI oscilloscope
-          Exec=$APP_NAME
-          Icon=$APP_NAME
+          Exec=ARG_OSCI_Installer
+          Icon=ARG_OSCI_Installer
           Categories=Development;Electronics;
           Terminal=false
           EOF
@@ -244,21 +198,55 @@ jobs:
           # Copy desktop file to standard location
           cp AppDir/${APP_NAME}.desktop AppDir/usr/share/applications/
           
-          # Create AppRun script (must be in AppDir root)
+          # Create a simpler AppRun script
           cat > AppDir/AppRun << 'EOL'
           #!/bin/bash
           HERE="$(dirname "$(readlink -f "${0}")")"
           export PATH="${HERE}/usr/bin:${PATH}"
           export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-          exec "${HERE}/usr/bin/ARG_OSCI_Installer" "$@"
+  
+          # Run the installer
+          "${HERE}/usr/bin/ARG_OSCI_Installer" "$@"
+  
+          # If it failed, try with system Python as fallback
+          if [ $? -ne 0 ]; then
+              echo "Attempting to run with system Python..."
+              if command -v python3 >/dev/null 2>&1; then
+                  # Copy the Python script to a temp directory
+                  TEMP_DIR=$(mktemp -d)
+                  cp "${HERE}/usr/bin/ARG_OSCI_ICON.png" "$TEMP_DIR/"
+                  
+                  # Get the installer from the repository
+                  INSTALLER_URL="https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py"
+                  if command -v curl >/dev/null 2>&1; then
+                      curl -sL $INSTALLER_URL > "$TEMP_DIR/installer.py" 
+                  elif command -v wget >/dev/null 2>&1; then
+                      wget -q -O "$TEMP_DIR/installer.py" $INSTALLER_URL
+                  else
+                      echo "Error: curl or wget is required for the fallback mode."
+                      exit 1
+                  fi
+                  
+                  # Run the installer with system Python
+                  cd "$TEMP_DIR" && python3 installer.py
+                  exit_code=$?
+                  
+                  # Clean up
+                  rm -rf "$TEMP_DIR"
+                  exit $exit_code
+              else
+                  echo "Error: Python 3 is not installed. Please install Python 3 and try again."
+                  exit 1
+              fi
+          fi
           EOL
           chmod +x AppDir/AppRun
           
           # Link the icon to root for AppImage to find it
           ln -sf usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png AppDir/${APP_NAME}.png
           
-          # List contents of AppDir for debugging
-          echo "Content of AppDir:"
+          # List contents to verify
+          echo "AppDir contents:"
           find AppDir -type f | sort
           
       - name: Download AppImage tools
@@ -269,13 +257,81 @@ jobs:
       - name: Build AppImage
         run: |
           # Create the AppImage with --no-appstream to bypass validation
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage --no-appstream -v AppDir ARG_OSCI_Installer-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --no-appstream AppDir ARG_OSCI_Installer-x86_64.AppImage
+      
+      - name: Create installation instructions
+        run: |
+          cat > README.txt << 'EOF'
+          # ARG_OSCI Firmware Installer for Linux
+  
+          ## Installation Instructions
+  
+          ### Method 1: Run directly
+          1. Right-click the AppImage file and select "Properties"
+          2. Go to the "Permissions" tab and check "Allow executing file as program"
+          3. Close the properties window and double-click the AppImage to run it
+  
+          ### Method 2: Terminal
+          1. Open a terminal in the directory containing the AppImage
+          2. Run: `chmod +x ARG_OSCI_Installer-x86_64.AppImage`
+          3. Run: `./ARG_OSCI_Installer-x86_64.AppImage`
+  
+          ### Using the helper script
+          A helper script is included to make launching easier:
+          1. Open a terminal in the directory containing the extracted files
+          2. Run: `./run.sh`
+  
+          ### Troubleshooting
+          If the AppImage doesn't work, the installer will automatically fall back to using your system's Python:
+          1. Make sure Python 3.6+ is installed (`sudo apt install python3 python3-pip`)
+          2. Make sure you have the required Python packages: 
+             `pip3 install --user requests pyserial pillow`
+  
+          ## About ARG_OSCI
+          The ARG_OSCI is an open-source oscilloscope project that transforms your ESP32 into a versatile signal analyzer.
+  
+          For more information and source code, visit [our GitHub repository](https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE)
+          EOF
+          
+      - name: Create helper script
+        run: |
+          cat > run.sh << 'EOF'
+          #!/bin/bash
+          # Helper script to make the AppImage executable and run it
+  
+          # Get the directory this script is in
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          APPIMAGE="${SCRIPT_DIR}/ARG_OSCI_Installer-x86_64.AppImage"
+  
+          # Make sure the AppImage is executable
+          chmod +x "${APPIMAGE}"
+          echo "Made AppImage executable"
+  
+          # Run the installer
+          echo "Running ARG_OSCI Installer..."
+          "${APPIMAGE}"
+          EOF
+          chmod +x run.sh
+          
+      - name: Create ZIP package
+        run: |
+          # Create verification file
+          echo "# File Hashes for Verification" > VERIFY.txt
+          echo "Generated on: $(date)" >> VERIFY.txt
+          echo "" >> VERIFY.txt
+          echo "## SHA-256" >> VERIFY.txt
+          sha256sum ARG_OSCI_Installer-x86_64.AppImage >> VERIFY.txt
+          
+          # Package everything together
+          zip ARG_OSCI_Installer_Linux.zip ARG_OSCI_Installer-x86_64.AppImage README.txt VERIFY.txt run.sh ARG_OSCI_ICON.png
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage
-          path: ARG_OSCI_Installer-x86_64.AppImage
+          name: linux-installer-package
+          path: |
+            ARG_OSCI_Installer_Linux.zip
+            ARG_OSCI_Installer-x86_64.AppImage
           
       - name: Upload to release
         if: github.event_name == 'release'
@@ -283,4 +339,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: ARG_OSCI_Installer-x86_64.AppImage
+          files: |
+            ARG_OSCI_Installer_Linux.zip
+            ARG_OSCI_Installer-x86_64.AppImage
