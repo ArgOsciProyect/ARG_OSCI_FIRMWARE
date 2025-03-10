@@ -31,7 +31,7 @@
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
   "idf.adapterTargetName": "esp32",
-  "idf.espIdfPath": "/home/jotalora/esp/v5.3.1/esp-idf",
-  "idf.toolsPath": "/home/jotalora/.espressif",
+  "idf.espIdfPath": "${env:HOME}/esp/esp-idf",
+  "idf.toolsPath": "${env:HOME}/.espressif",
   "idf.portWin": "COM3"
 }
