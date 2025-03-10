@@ -130,82 +130,126 @@ class ARG_OSCI_Installer:
         self.root.title("ARG_OSCI Firmware Installer")
         self.root.geometry("800x600")
         
-        self.temp_dir = tempfile.mkdtemp()
-        self.firmware_path = os.path.join(self.temp_dir, "firmware")
-        self.idf_path = os.path.join(self.temp_dir, "esp-idf")
-        self.idf_tools_path = os.path.join(self.temp_dir, "esp-idf-tools")
+        # Use the directory where the script is running instead of temp dir
+        self.base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         
+        # Initialize default paths
+        self.firmware_path = os.path.join(self.base_dir, "firmware")
+        self.idf_path = os.path.join(self.base_dir, "esp-idf")
+        self.idf_tools_path = os.path.join(self.base_dir, "esp-idf-tools")
+        
+        # Create directories if they don't exist
+        os.makedirs(self.firmware_path, exist_ok=True)
+        os.makedirs(self.idf_path, exist_ok=True)
+        os.makedirs(self.idf_tools_path, exist_ok=True)
+        
+        # Load saved configuration
         self.setup_ui()
+        
+        # After UI is set up, load configuration
+        config = self.load_config()
+        
+        # Update UI with loaded config values
+        self.ssid_var.set(config["ssid"])
+        self.password_var.set(config["password"])
+        self.adc_mode_var.set(config["adc_mode"])
+        self.firmware_path_var.set(config["firmware_path"])
+        self.idf_path_var.set(config["idf_path"])
+        self.idf_tools_path_var.set(config["idf_tools_path"])
+        
+        # Set port if it exists in config and is available
+        if config["port"]:
+            available_ports = self.get_serial_ports()
+            if config["port"] in available_ports:
+                self.port_var.set(config["port"])
+        
+        # Setup serial monitor
+        self.serial_connected = False
+        self.serial_thread = None
+        self.serial_port = None
+        self.stop_monitor = threading.Event()
     
+    def __del__(self):
+        """Clean up resources when the object is destroyed"""
+        try:
+            # Just close any open serial connections
+            if hasattr(self, 'serial_port') and self.serial_port:
+                self.serial_port.close()
+        except Exception as e:
+            print(f"Error cleaning up resources: {str(e)}")
+
     def setup_ui(self):
         # Create tabs
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
+
         config_frame = ttk.Frame(notebook)
         install_frame = ttk.Frame(notebook)
         path_frame = ttk.Frame(notebook)
         monitor_frame = ttk.Frame(notebook)  # New tab for serial monitor
-        
+
         notebook.add(config_frame, text="Configuration")
         notebook.add(path_frame, text="Installation Paths")
         notebook.add(install_frame, text="Installation")
         notebook.add(monitor_frame, text="Serial Monitor")
-        
+
         # Configuration tab
         ttk.Label(config_frame, text="WiFi Configuration", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", pady=10)
-        
+
         # [Rest of the configuration UI remains the same]
         ttk.Label(config_frame, text="SSID:").grid(row=1, column=0, sticky="w", padx=20)
         self.ssid_var = tk.StringVar(value="ESP32_AP")
         ttk.Entry(config_frame, textvariable=self.ssid_var, width=30).grid(row=1, column=1, sticky="w")
-        
+
         ttk.Label(config_frame, text="Password:").grid(row=2, column=0, sticky="w", padx=20)
         self.password_var = tk.StringVar(value="password123")
         ttk.Entry(config_frame, textvariable=self.password_var, width=30).grid(row=2, column=1, sticky="w")
-        
+
         ttk.Label(config_frame, text="Hardware Configuration", font=("Arial", 12, "bold")).grid(row=3, column=0, sticky="w", pady=10)
-        
+
         self.adc_mode_var = tk.StringVar(value="internal")
         ttk.Radiobutton(config_frame, text="Internal ADC", variable=self.adc_mode_var, value="internal").grid(row=4, column=0, sticky="w", padx=20)
         ttk.Radiobutton(config_frame, text="External ADC", variable=self.adc_mode_var, value="external").grid(row=4, column=1, sticky="w")
-        
+
         ttk.Label(config_frame, text="Serial Port", font=("Arial", 12, "bold")).grid(row=5, column=0, sticky="w", pady=10)
-        
+
         self.port_var = tk.StringVar()
         self.port_combo = ttk.Combobox(config_frame, textvariable=self.port_var, width=30)
         self.port_combo.grid(row=6, column=0, columnspan=2, sticky="w", padx=20)
-        
+
         ttk.Button(config_frame, text="Refresh Ports", command=self.refresh_ports).grid(row=6, column=2, padx=5)
-        
+
         # Installation paths tab
         ttk.Label(path_frame, text="Installation Paths", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", pady=10)
-        
+
         ttk.Label(path_frame, text="Firmware Path:").grid(row=1, column=0, sticky="w", padx=20)
-        self.firmware_path_var = tk.StringVar(value=os.path.join(self.temp_dir, "firmware"))
+        # Use self.base_dir instead of self.temp_dir here
+        self.firmware_path_var = tk.StringVar(value=os.path.join(self.base_dir, "firmware"))
         ttk.Entry(path_frame, textvariable=self.firmware_path_var, width=40).grid(row=1, column=1, sticky="w")
         ttk.Button(path_frame, text="Browse", command=lambda: self.select_directory("firmware")).grid(row=1, column=2, padx=5)
-        
+
         ttk.Label(path_frame, text="ESP-IDF Path:").grid(row=2, column=0, sticky="w", padx=20)
-        self.idf_path_var = tk.StringVar(value=os.path.join(self.temp_dir, "esp-idf"))
+        # Use self.base_dir instead of self.temp_dir here
+        self.idf_path_var = tk.StringVar(value=os.path.join(self.base_dir, "esp-idf"))
         ttk.Entry(path_frame, textvariable=self.idf_path_var, width=40).grid(row=2, column=1, sticky="w")
         ttk.Button(path_frame, text="Browse", command=lambda: self.select_directory("esp-idf")).grid(row=2, column=2, padx=5)
-        
+
         ttk.Label(path_frame, text="ESP-IDF Tools Path:").grid(row=3, column=0, sticky="w", padx=20)
-        self.idf_tools_path_var = tk.StringVar(value=os.path.join(self.temp_dir, "esp-idf-tools"))
+        # Use self.base_dir instead of self.temp_dir here
+        self.idf_tools_path_var = tk.StringVar(value=os.path.join(self.base_dir, "esp-idf-tools"))
         ttk.Entry(path_frame, textvariable=self.idf_tools_path_var, width=40).grid(row=3, column=1, sticky="w")
         ttk.Button(path_frame, text="Browse", command=lambda: self.select_directory("tools")).grid(row=3, column=2, padx=5)
-        
-        ttk.Button(path_frame, text="Check for Existing ESP-IDF", command=self.find_existing_esp_idf).grid(row=4, column=1, pady=10)
-        
+
+        ttk.Button(path_frame, text="Already have ESP-IDF installed?", command=self.find_existing_esp_idf).grid(row=4, column=1, pady=10)
+
         # Installation tab
         # [Rest of the installation UI remains the same]
         self.progress = ttk.Progressbar(install_frame, orient="horizontal", length=500, mode="determinate")
         self.progress.pack(pady=20, padx=20, fill="x")
-        
+
         self.status_text = tk.Text(install_frame, height=15, width=70)
         self.status_text.pack(pady=10, padx=20, fill="both", expand=True)
-        
+           
     
         # Serial Monitor tab
         ttk.Label(monitor_frame, text="Serial Monitor", font=("Arial", 12, "bold")).pack(anchor="w", pady=10)
@@ -278,7 +322,82 @@ class ARG_OSCI_Installer:
         self.serial_thread = None
         self.serial_port = None
         self.stop_monitor = threading.Event()
+        # Add save functionality when closing the app
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Add trace to path variables to save when changed
+        self.firmware_path_var.trace_add("write", self.path_changed)
+        self.idf_path_var.trace_add("write", self.path_changed)
+        self.idf_tools_path_var.trace_add("write", self.path_changed)
     
+
+    def path_changed(self, *args):
+        """Called when path variables are changed"""
+        # Save configuration when paths are changed
+        self.save_config()
+    
+    def on_closing(self):
+        """Handle window closing event"""
+        # Save current configuration
+        self.save_config()
+        
+        # Clean up resources
+        if hasattr(self, 'serial_port') and self.serial_port:
+            self.serial_port.close()
+        
+        # Destroy the window
+        self.root.destroy()
+
+    def load_config(self):
+        """Load configuration from a file"""
+        config_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "arg_osci_installer.cfg")
+        config = {
+            "ssid": "ESP32_AP",
+            "password": "password123",
+            "adc_mode": "internal",
+            "firmware_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "firmware"),
+            "idf_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "esp-idf"),
+            "idf_tools_path": os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "esp-idf-tools"),
+            "port": ""
+        }
+
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r') as f:
+                    saved_config = {}
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            saved_config[key] = value
+
+                    # Update default config with saved values
+                    for key in config:
+                        if key in saved_config:
+                            config[key] = saved_config[key]
+
+                self.log("Configuration loaded from file")
+            except Exception as e:
+                self.log(f"Error loading configuration: {e}")
+
+        return config
+    
+    def save_config(self):
+        """Save current configuration to a file"""
+        config_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "arg_osci_installer.cfg")
+        
+        try:
+            with open(config_file, 'w') as f:
+                f.write(f"ssid={self.ssid_var.get()}\n")
+                f.write(f"password={self.password_var.get()}\n")
+                f.write(f"adc_mode={self.adc_mode_var.get()}\n")
+                f.write(f"firmware_path={self.firmware_path_var.get()}\n")
+                f.write(f"idf_path={self.idf_path_var.get()}\n")
+                f.write(f"idf_tools_path={self.idf_tools_path_var.get()}\n")
+                f.write(f"port={self.port_var.get()}\n")
+            
+            self.log("Configuration saved to file")
+        except Exception as e:
+            self.log(f"Error saving configuration: {e}")
 
     def refresh_monitor_ports(self):
         """Refresh the monitor serial ports"""
@@ -395,24 +514,69 @@ class ARG_OSCI_Installer:
             elif dir_type == "tools":
                 self.idf_tools_path_var.set(directory)
     
+    def verify_idf_tools_path(self, idf_path):
+        """Verify that the current IDF tools path is valid for the given ESP-IDF path"""
+        tools_path = self.idf_tools_path_var.get()
+        
+        if not tools_path or not os.path.exists(tools_path):
+            return False
+        
+        # Check if this tools path contains a Python environment
+        python_env_path = os.path.join(tools_path, "python_env")
+        if not os.path.exists(python_env_path):
+            return False
+        
+        # Check for the IDF Python environment
+        for env_dir in os.listdir(python_env_path) if os.path.exists(python_env_path) else []:
+            if env_dir.startswith("idf") and os.path.isdir(os.path.join(python_env_path, env_dir)):
+                return True
+        
+        return False
+
     def find_existing_esp_idf(self):
-        """Check for existing ESP-IDF installations"""
-        # First check environment variables
+        """Find existing ESP-IDF installations and properly configure related paths"""
+        self.log("Searching for existing ESP-IDF installations...")
+        
+        # First check the configured path
+        configured_path = self.idf_path_var.get()
+        if os.path.exists(configured_path) and os.path.isfile(
+            os.path.join(configured_path, "export.sh" if platform.system() != "Windows" else "export.bat")
+        ):
+            # If the configured path already has ESP-IDF, verify the tools path
+            if not self.verify_idf_tools_path(configured_path):
+                self.log("Warning: ESP-IDF tools path appears to be incorrect")
+                
+                # Try to find or create a valid tools path
+                valid_tools_path = self.find_valid_tools_path(configured_path)
+                if valid_tools_path:
+                    self.log(f"Updated ESP-IDF tools path to: {valid_tools_path}")
+                    self.idf_tools_path_var.set(valid_tools_path)
+                    self.save_config()
+            
+            self.log(f"Found ESP-IDF at the configured path: {configured_path}")
+            messagebox.showinfo("ESP-IDF Found", f"ESP-IDF is already configured at:\n{configured_path}")
+            return
+        
+        # Next check environment variables for IDF_PATH
         env_locations = []
         if os.environ.get("IDF_PATH"):
             env_locations.append(os.environ.get("IDF_PATH"))
         if os.environ.get("ESP_IDF_PATH"):
             env_locations.append(os.environ.get("ESP_IDF_PATH"))
                 
-        # Get user home directory correctly for each platform
+        # Check environment variable for IDF_TOOLS_PATH
+        tools_env = os.environ.get("IDF_TOOLS_PATH")
+        tools_env_valid = tools_env and os.path.exists(tools_env)
+        
+        # Get user home directory for platform-specific paths
         home_dir = os.path.expanduser("~")
         username = os.path.basename(home_dir)
-            
-        # Common installation locations
+        
+        # Standard locations for ESP-IDF
         possible_locations = [
-            # Environment variable locations
+            # Environment variable locations first
             *env_locations,
-            # Linux locations
+            # Linux/macOS locations
             os.path.join(home_dir, "esp", "esp-idf"),
             os.path.join(home_dir, ".espressif", "esp-idf"),
             os.path.join("/opt", "esp", "esp-idf"),
@@ -422,67 +586,149 @@ class ARG_OSCI_Installer:
             os.path.join("C:\\", "Users", username, "esp", "esp-idf"),
             os.path.join("C:\\", "Espressif", "frameworks", "esp-idf-v5.3.1")
         ]
-            
+        
+        # Check the standard locations
         for location in possible_locations:
-            if location and os.path.exists(location) and os.path.isfile(os.path.join(location, "export.sh" if platform.system() != "Windows" else "export.bat")):
+            if location and os.path.exists(location) and os.path.isfile(
+                os.path.join(location, "export.sh" if platform.system() != "Windows" else "export.bat")
+            ):
+                # Found an ESP-IDF installation
                 self.idf_path_var.set(location)
-                    
-                # Check for tools path
-                tools_env = os.environ.get("IDF_TOOLS_PATH")
-                if tools_env and os.path.exists(tools_env):
+                
+                # Find valid tools path
+                if tools_env_valid:
                     self.idf_tools_path_var.set(tools_env)
                 else:
-                    # Common tools paths relative to ESP-IDF
-                    for tools_dir in [os.path.join(os.path.dirname(location), "esp-idf-tools"),
-                                     os.path.join(home_dir, ".espressif")]:
-                        if os.path.exists(tools_dir):
-                            self.idf_tools_path_var.set(tools_dir)
-                            break
-                    
-                messagebox.showinfo("ESP-IDF Found", f"Found existing ESP-IDF installation at:\n{location}")
+                    valid_tools_path = self.find_valid_tools_path(location)
+                    if valid_tools_path:
+                        self.idf_tools_path_var.set(valid_tools_path)
+                
+                # Save the configuration
+                self.save_config()
+                
+                version_info = self.get_esp_idf_version_str(location)
+                messagebox.showinfo("ESP-IDF Found", f"Found ESP-IDF {version_info} at:\n{location}")
                 return
+        
+        # If we didn't find ESP-IDF in standard locations, perform a deeper search
+        self.log("Quick detection didn't find ESP-IDF. Performing deeper search...")
+        
+        # Directories to search more deeply
+        search_dirs = [home_dir]  # Always include home directory
+        
+        # Add common ESP directories based on platform
+        if platform.system() == "Windows":
+            search_dirs.extend([
+                "C:\\esp",
+                "C:\\Espressif",
+                os.path.join("C:\\", "Users", username, "Documents"),
+                os.path.join("C:\\", "Users", username, "Projects"),
+            ])
+        else:  # Linux/macOS
+            search_dirs.extend([
+                os.path.join(home_dir, "esp"),
+                os.path.join(home_dir, "Projects"),
+                os.path.join(home_dir, "Documents"),
+                "/opt",
+            ])
+        
+        # List to store all found installations
+        all_installations = []
+        
+        # Search each directory recursively
+        for directory in search_dirs:
+            if os.path.exists(directory):
+                self.log(f"Searching in {directory}...")
+                found_installations = self.find_esp_idf_recursively(directory, max_depth=3)
+                if found_installations:
+                    all_installations.extend(found_installations)
+        
+        if all_installations:
+            # Sort installations by version, prioritizing 5.3.1 or newer
+            all_installations.sort(key=self.get_esp_idf_version, reverse=True)
             
-        # If automatic detection failed, ask the user to manually locate ESP-IDF
+            # Prefer version 5.3.1 specifically
+            v531_installations = [
+                path for path in all_installations 
+                if self.get_esp_idf_version(path) >= (5, 3, 1)
+            ]
+            
+            # Use 5.3.1+ if available, otherwise use the highest version
+            best_match = v531_installations[0] if v531_installations else all_installations[0]
+            self.idf_path_var.set(best_match)
+            
+            # Find a valid tools path for the selected ESP-IDF
+            valid_tools_path = self.find_valid_tools_path(best_match)
+            if valid_tools_path:
+                self.idf_tools_path_var.set(valid_tools_path)
+            
+            # Save the configuration
+            self.save_config()
+            
+            version_info = self.get_esp_idf_version_str(best_match)
+            messagebox.showinfo("ESP-IDF Found", 
+                              f"Found ESP-IDF {version_info} at:\n{best_match}\n\n"
+                              f"Total ESP-IDF installations found: {len(all_installations)}")
+            return
+        
+        # If still no ESP-IDF found, ask for manual location
         manual_response = messagebox.askquestion("ESP-IDF Not Found", 
-                                               "Automatic detection couldn't find ESP-IDF installation.\n\n"
-                                               "Would you like to manually locate a directory to search for ESP-IDF?")
+                                              "Automatic detection couldn't find ESP-IDF installation.\n\n"
+                                              "Would you like to select an ESP-IDF directory manually?")
         if manual_response == 'yes':
             from tkinter import filedialog
-            selected_dir = filedialog.askdirectory(title="Select Directory to Search for ESP-IDF")
+            selected_dir = filedialog.askdirectory(title="Select ESP-IDF Directory")
             
             if selected_dir:
-                self.log("Searching for ESP-IDF installations, this may take a moment...")
-                # Find all ESP-IDF installations in the selected directory up to 4 levels deep
-                esp_idf_installations = self.find_esp_idf_recursively(selected_dir, max_depth=4)
-                
-                if esp_idf_installations:
-                    # Sort installations by version, prioritizing 5.3.1 or newer
-                    esp_idf_installations.sort(key=self.get_esp_idf_version, reverse=True)
-                    best_match = esp_idf_installations[0]
+                # Check if this is a valid ESP-IDF directory
+                if os.path.isfile(os.path.join(selected_dir, "export.sh" if platform.system() != "Windows" else "export.bat")):
+                    self.idf_path_var.set(selected_dir)
                     
-                    self.idf_path_var.set(best_match)
+                    # Find a valid tools path for the selected ESP-IDF
+                    valid_tools_path = self.find_valid_tools_path(selected_dir)
+                    if valid_tools_path:
+                        self.idf_tools_path_var.set(valid_tools_path)
+                        
+                    # Save the configuration
+                    self.save_config()
                     
-                    # Try to find tools path near the ESP-IDF directory
-                    home_dir = os.path.expanduser("~")
-                    for tools_dir in [os.path.join(os.path.dirname(best_match), "esp-idf-tools"),
-                                     os.path.join(home_dir, ".espressif")]:
-                        if os.path.exists(tools_dir):
-                            self.idf_tools_path_var.set(tools_dir)
-                            break
-                    
-                    version_info = self.get_esp_idf_version_str(best_match)
-                    messagebox.showinfo("ESP-IDF Found", 
-                                       f"Found ESP-IDF {version_info} at:\n{best_match}\n\n"
-                                       f"Total installations found: {len(esp_idf_installations)}")
+                    version_info = self.get_esp_idf_version_str(selected_dir)
+                    messagebox.showinfo("ESP-IDF Found", f"Selected ESP-IDF {version_info}")
                     return
                 else:
-                    messagebox.showerror("ESP-IDF Not Found", 
-                                        "No ESP-IDF installations found in the selected directory.")
+                    messagebox.showerror("Invalid Directory", "The selected directory doesn't appear to be a valid ESP-IDF installation")
         
+        # If no ESP-IDF found, inform the user it will be downloaded
         messagebox.showinfo("ESP-IDF Not Found", 
-                           "No existing ESP-IDF installation found. It will be downloaded during installation.")    
+                          "No existing ESP-IDF installation found. It will be downloaded during installation.")        
     
-    def find_esp_idf_recursively(self, directory, max_depth=4, current_depth=0):
+    def find_valid_tools_path(self, idf_path):
+        """Find a valid tools path for the given ESP-IDF path"""
+        home_dir = os.path.expanduser("~")
+        
+        # Ordered list of potential valid tool paths
+        potential_paths = [
+            os.environ.get("IDF_TOOLS_PATH"),  # Check environment variable first
+            os.path.join(home_dir, ".espressif"),  # Standard location
+            os.path.join(os.path.dirname(idf_path), "esp-idf-tools"),  # Next to ESP-IDF
+            os.path.join(home_dir, "esp", "esp-idf-tools"),  # Common alternative
+        ]
+        
+        # Check if any of these paths exist
+        for path in potential_paths:
+            if path and os.path.exists(path):
+                # Path exists - now check if it's a valid tools path with Python env
+                python_env_path = os.path.join(path, "python_env")
+                if os.path.exists(python_env_path):
+                    # Found existing Python env - this is probably a valid tools path
+                    return path
+        
+        # If no existing valid path found, use the standard .espressif location
+        standard_path = os.path.join(home_dir, ".espressif")
+        os.makedirs(standard_path, exist_ok=True)
+        return standard_path
+
+    def find_esp_idf_recursively(self, directory, max_depth=3, current_depth=0):
         """
         Recursively search for ESP-IDF installations in a directory
         Returns a list of paths to ESP-IDF installations
@@ -502,12 +748,15 @@ class ARG_OSCI_Installer:
             for item in os.listdir(directory):
                 full_path = os.path.join(directory, item)
                 if os.path.isdir(full_path):
+                    # Skip hidden directories and certain common directories that won't have ESP-IDF
+                    if item.startswith('.') or item in ['node_modules', 'venv', 'env', '__pycache__']:
+                        continue
                     results.extend(self.find_esp_idf_recursively(full_path, max_depth, current_depth + 1))
         except (PermissionError, OSError):
             # Skip directories we can't access
             pass
         
-        return results
+        return results   
     
     def get_esp_idf_version(self, idf_path):
         """
@@ -568,6 +817,9 @@ class ARG_OSCI_Installer:
         try:
             self.progress["value"] = 0
             self.log("Starting installation...")
+            
+            # Save current configuration
+            self.save_config()
             
             # Update paths from UI
             self.firmware_path = self.firmware_path_var.get()
@@ -776,49 +1028,62 @@ class ARG_OSCI_Installer:
     
     
     def download_firmware(self):
-        """Download the latest stable firmware from GitHub"""
-        response = requests.get("https://api.github.com/repos/ArgOsciProyect/ARG_OSCI_FIRMWARE/releases/latest")
-        if response.status_code != 200:
-            self.log("Failed to get latest release info. Downloading from main branch instead.")
-            zip_url = "https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE/archive/refs/heads/main.zip"
-        else:
-            release_data = response.json()
-            zip_url = release_data.get("zipball_url")
-            if not zip_url:
-                zip_url = "https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE/archive/refs/heads/main.zip"
+        """Download the latest firmware from GitHub main branch"""
+        # Always use the main branch
+        zip_url = "https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE/archive/refs/heads/main.zip"
         
         self.log(f"Downloading firmware from {zip_url}")
-        response = requests.get(zip_url)
-        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
-            zip_file.extractall(self.temp_dir)
+        
+        try:
+            response = requests.get(zip_url)
+            response.raise_for_status()  # Raise an exception for HTTP errors
             
-            # Find the extracted directory (it might have a version-specific name)
-            extracted_dirs = [d for d in os.listdir(self.temp_dir) 
-                             if os.path.isdir(os.path.join(self.temp_dir, d)) and 
-                             (d.startswith("ArgOsciProyect-ARG_OSCI_FIRMWARE") or 
-                              d.startswith("ARG_OSCI_FIRMWARE"))]
-            if extracted_dirs:
-                # Move the contents to the firmware directory
-                extracted_dir = os.path.join(self.temp_dir, extracted_dirs[0])
-                os.makedirs(self.firmware_path, exist_ok=True)
-                
-                # Copy all contents to the firmware path
-                for item in os.listdir(extracted_dir):
-                    s = os.path.join(extracted_dir, item)
-                    d = os.path.join(self.firmware_path, item)
-                    if os.path.isdir(s):
-                        shutil.copytree(s, d)
+            # Create a temporary directory for extraction
+            with tempfile.TemporaryDirectory() as temp_extract_dir:
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
+                    zip_file.extractall(temp_extract_dir)
+                    
+                    # Find the extracted directory (should be ARG_OSCI_FIRMWARE-main)
+                    extracted_dirs = [d for d in os.listdir(temp_extract_dir) 
+                                   if os.path.isdir(os.path.join(temp_extract_dir, d)) and 
+                                      "ARG_OSCI_FIRMWARE" in d]
+                                      
+                    if extracted_dirs:
+                        # Move the contents to the firmware directory
+                        extracted_dir = os.path.join(temp_extract_dir, extracted_dirs[0])
+                        firmware_path = self.firmware_path_var.get()
+                        os.makedirs(firmware_path, exist_ok=True)
+                        
+                        self.log(f"Extracting firmware to {firmware_path}...")
+                        
+                        # Copy all contents to the firmware path
+                        for item in os.listdir(extracted_dir):
+                            s = os.path.join(extracted_dir, item)
+                            d = os.path.join(firmware_path, item)
+                            if os.path.isdir(s):
+                                if os.path.exists(d):
+                                    shutil.rmtree(d)
+                                shutil.copytree(s, d)
+                            else:
+                                shutil.copy2(s, d)
+                        
+                        self.log(f"Firmware extraction completed successfully")
                     else:
-                        shutil.copy2(s, d)
-                
-                self.log(f"Firmware extracted to {self.firmware_path}")
-            else:
-                raise Exception("Failed to extract firmware files")
-    
+                        raise Exception("Failed to find the firmware directory after extraction")
+        except requests.exceptions.RequestException as e:
+            self.log(f"Error downloading firmware: {e}")
+            raise Exception(f"Failed to download firmware: {e}")
+        except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
+            self.log(f"Error extracting zip file: {e}")
+            raise Exception(f"Failed to extract firmware: {e}")
+        except Exception as e:
+            self.log(f"Unexpected error during firmware download: {e}")
+            raise          
+
     def setup_esp_idf(self):
         """Download and set up ESP-IDF"""
         # Set environment variables
-        os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path
+        os.environ["IDF_TOOLS_PATH"] = self.idf_tools_path_var.get()
         
         # Create directories
         os.makedirs(self.idf_path, exist_ok=True)
@@ -826,9 +1091,6 @@ class ARG_OSCI_Installer:
         
         # Download ESP-IDF
         self.log("Downloading ESP-IDF v5.3.1...")
-        
-        # Instead of downloading a ZIP, let's clone the git repository with submodules
-        self.log("Cloning ESP-IDF repository with submodules...")
         
         # First, check if git is available
         if not shutil.which("git"):
@@ -849,21 +1111,23 @@ class ARG_OSCI_Installer:
         if platform.system() != "Windows":
             self.check_and_fix_esp_idf_permissions()
         
-        # Install ESP-IDF dependencies
+        # Install ESP-IDF dependencies with IDF_TOOLS_PATH explicitly set
         self.log("Installing ESP-IDF dependencies...")
         
         # Determine the install script to use based on the platform
         if platform.system() == "Windows":
             install_script = os.path.join(self.idf_path, "install.bat")
+            install_cmd = f'set "IDF_TOOLS_PATH={self.idf_tools_path}" && "{install_script}"'
         else:
             install_script = os.path.join(self.idf_path, "install.sh")
             # Make sure the script is executable
             os.chmod(install_script, 0o755)
+            install_cmd = f'export IDF_TOOLS_PATH="{self.idf_tools_path}" && "{install_script}"'
         
         # Run the install script
-        self.execute_command(install_script)
+        self.execute_command(install_cmd)
         self.log("ESP-IDF dependencies installed")
-
+        
     def configure_firmware(self):
         """Configure the firmware based on user settings"""
         globals_h_path = os.path.join(self.firmware_path, "main", "globals.h")

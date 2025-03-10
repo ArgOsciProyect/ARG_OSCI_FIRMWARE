@@ -53,7 +53,7 @@ jobs:
                     StringStruct(u"LegalCopyright", u"© 2025 ARG_OSCI Project"),
                     StringStruct(u"OriginalFilename", u"ARG_OSCI_Installer.exe"),
                     StringStruct(u"ProductName", u"ARG_OSCI Firmware Installer"),
-                    StringStruct(u"ProductVersion", u"0.2.1")])
+                    StringStruct(u"ProductVersion", u"0.3.0")])
                 ]
               ),
               VarFileInfo([VarStruct(u"Translation", [0x0409, 1200])])
