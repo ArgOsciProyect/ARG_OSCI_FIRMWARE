@@ -372,7 +372,7 @@ void init_sine_wave(void)
     // Configuración de la onda senoidal DAC
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
-        .chan_id = DAC_CHAN_0,
+        .chan_id = DAC_CHAN_1,
         .freq_hz = 10000, // Frecuencia de la señal senoidal en Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,

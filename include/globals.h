@@ -14,6 +14,7 @@
 #include <driver/mcpwm_prelude.h>
 #include <driver/pulse_cnt.h>
 #include <driver/spi_master.h>
+#include "driver/gpio.h"
 #include <esp_http_server.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -21,7 +22,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-// #define USE_EXTERNAL_ADC // Comment to use internal ADC
+#define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"
@@ -40,7 +41,7 @@
 #define TIMER_INTERVAL_US 2048
 
 /* ADC Configuration */
-#define ADC_CHANNEL ADC_CHANNEL_5
+#define ADC_CHANNEL ADC_CHANNEL_6
 #define ADC_BITWIDTH ADC_WIDTH_BIT_10
 #define SAMPLE_RATE_HZ 600000 /* 600 kHz */
 #define WAIT_ADC_CONV_TIME 15
@@ -48,14 +49,14 @@
 /* GPIO Definitions */
 #define GPIO_INPUT_PIN GPIO_NUM_11
 #define PIN_NUM_MISO 12
-#define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK 14
 #define PIN_NUM_CS 15
-#define MCPWM_GPIO 16
-#define SYNC_GPIO 17
-#define SQUARE_WAVE_GPIO GPIO_NUM_18
-#define SINGLE_INPUT_PIN GPIO_NUM_19
-#define TRIGGER_PWM_GPIO GPIO_NUM_26
+#define MCPWM_GPIO 13
+#define SYNC_GPIO 2
+#define SQUARE_WAVE_GPIO GPIO_NUM_32
+#define SINGLE_INPUT_PIN GPIO_NUM_33
+#define TRIGGER_PWM_GPIO GPIO_NUM_27
+#define LED_GPIO GPIO_NUM_25
 
 /* SPI Configuration */
 #define CS_CLK_TO_PWM 10

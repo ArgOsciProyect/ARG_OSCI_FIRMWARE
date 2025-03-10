@@ -249,3 +249,18 @@ cJSON *scan_and_get_ap_records(uint16_t *num_networks)
 
     return root;
 }
+
+void configure_led_gpio(void)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << LED_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    
+    // Initialize at low level (0)
+    ESP_ERROR_CHECK(gpio_set_level(LED_GPIO, 0));
+}

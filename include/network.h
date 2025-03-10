@@ -32,6 +32,14 @@
 void wifi_init(void);
 
 /**
+ * @brief Configure led GPIO pin as output
+ *
+ * Configures a GPIO pin as output and initializes it to low state.
+ * Used for indicating socket creation and connection availability status.
+ */
+void configure_led_gpio(void);
+
+/**
  * @brief Safely close a socket connection
  *
  * Attempts to gracefully shut down a socket connection with timeout.
