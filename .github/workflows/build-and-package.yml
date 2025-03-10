@@ -48,12 +48,12 @@ jobs:
                     u"040904B0",
                     [StringStruct(u"CompanyName", u"ARG_OSCI Project"),
                     StringStruct(u"FileDescription", u"ARG_OSCI Firmware Installer"),
-                    StringStruct(u"FileVersion", u"1.0.0"),
+                    StringStruct(u"FileVersion", u"1.1.0"),
                     StringStruct(u"InternalName", u"ARG_OSCI_Installer"),
                     StringStruct(u"LegalCopyright", u"© 2025 ARG_OSCI Project"),
                     StringStruct(u"OriginalFilename", u"ARG_OSCI_Installer.exe"),
                     StringStruct(u"ProductName", u"ARG_OSCI Firmware Installer"),
-                    StringStruct(u"ProductVersion", u"0.3.0")])
+                    StringStruct(u"ProductVersion", u"0.3.3")])
                 ]
               ),
               VarFileInfo([VarStruct(u"Translation", [0x0409, 1200])])
