@@ -1,5 +1,5 @@
 /build
-.vscode
+/.vscode
 .devcontainer/devcontainer.json
 .devcontainer/Dockerfile
 .vscode/settings.json
