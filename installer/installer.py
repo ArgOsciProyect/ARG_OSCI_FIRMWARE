@@ -1,6 +1,117 @@
 import os
 import sys
 import subprocess
+import platform
+import shutil
+
+def ensure_python_dependencies():
+    """
+    Verifica y gestiona las dependencias de Python necesarias
+    para ejecutar la aplicación correctamente
+    """
+    required_packages = ["requests", "pyserial", "pillow"]
+    missing_packages = []
+    
+    # Verificar qué paquetes faltan
+    try:
+        import requests
+    except ImportError:
+        missing_packages.append("requests")
+        
+    try:
+        import serial
+    except ImportError:
+        missing_packages.append("pyserial")
+        
+    try:
+        import PIL
+    except ImportError:
+        missing_packages.append("pillow")
+    
+    # Si no faltan paquetes, continuar
+    if not missing_packages:
+        return True
+    
+    print(f"Faltan dependencias Python: {', '.join(missing_packages)}")
+    print("Intentando instalar automáticamente...")
+    
+    # Intentar instalar con pip
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user"] + required_packages)
+        print("Dependencias instaladas correctamente. Reiniciando aplicación...")
+        
+        # Reiniciar la aplicación para usar las nuevas dependencias
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+        return True
+    except subprocess.CalledProcessError:
+        print("No se pudo instalar con pip. Intentando con el gestor de paquetes del sistema...")
+        
+        # Intentar con el gestor de paquetes del sistema
+        if platform.system() == "Linux":
+            installed = False
+            
+            # Debian/Ubuntu
+            if shutil.which("apt"):
+                packages = ["python3-requests", "python3-serial", "python3-pil", "python3-tk"]
+                try:
+                    print("Instalando paquetes con apt...")
+                    subprocess.run(["pkexec", "apt", "install", "-y"] + packages, check=True)
+                    installed = True
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+                    
+            # Fedora/RHEL
+            if not installed and shutil.which("dnf"):
+                packages = ["python3-requests", "python3-pyserial", "python3-pillow", "python3-tkinter"]
+                try:
+                    print("Instalando paquetes con dnf...")
+                    subprocess.run(["pkexec", "dnf", "install", "-y"] + packages, check=True)
+                    installed = True
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+                    
+            # Arch Linux
+            if not installed and shutil.which("pacman"):
+                packages = ["python-requests", "python-pyserial", "python-pillow", "python-tk"]
+                try:
+                    print("Instalando paquetes con pacman...")
+                    subprocess.run(["pkexec", "pacman", "-S", "--noconfirm"] + packages, check=True)
+                    installed = True
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+            
+            if installed:
+                print("Dependencias instaladas con el gestor de paquetes del sistema.")
+                print("Reiniciando aplicación...")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+                return True
+        
+        # Si llegamos aquí, no se pudo instalar automáticamente
+        print("\nERROR: No se pudieron instalar las dependencias automáticamente.")
+        print("Por favor, instale manualmente los siguientes paquetes Python:")
+        print("  - requests (para comunicación HTTP)")
+        print("  - pyserial (para comunicación serial)")
+        print("  - pillow (para procesamiento de imágenes)")
+        print("  - tkinter (para la interfaz gráfica)")
+        print("\nComando para instalar con pip:")
+        print(f"  {sys.executable} -m pip install --user requests pyserial pillow")
+        print("\nO use el gestor de paquetes de su distribución.")
+        
+        # Pedir confirmación antes de continuar
+        try:
+            input("\nPresione Enter para salir...")
+        except:
+            pass
+        sys.exit(1)
+
+# Ejecutar verificación de dependencias antes de importar otros módulos
+if __name__ == "__main__":
+    ensure_python_dependencies()
+
+
+import os
+import sys
+import subprocess
 import tempfile
 import shutil
 import platform
@@ -1029,10 +1140,25 @@ class ARG_OSCI_Installer:
             return True
         
 def main():
-    # Create the main window
-    root = tk.Tk()
-    app = ARG_OSCI_Installer(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = ARG_OSCI_Installer(root)
+        root.mainloop()
+    except ImportError as e:
+        print(f"Error al cargar módulos: {e}")
+        print("Intentando instalar dependencias faltantes...")
+        ensure_python_dependencies()
+        # Si llegamos aquí, algo falló en la instalación de dependencias
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error inesperado: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            input("\nPresione Enter para salir...")
+        except:
+            pass
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

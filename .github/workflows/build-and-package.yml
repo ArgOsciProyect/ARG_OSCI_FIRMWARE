@@ -16,6 +16,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -24,18 +25,110 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller requests pyserial pillow
+          pip install pyinstaller requests pyserial pillow pywin32
+  
+      - name: Build digital signature information
+        run: |
+          # Create version info file
+          echo 'VSVersionInfo(
+            ffi=FixedFileInfo(
+              filevers=(1, 0, 0, 0),
+              prodvers=(1, 0, 0, 0),
+              mask=0x3f,
+              flags=0x0,
+              OS=0x40004,
+              fileType=0x1,
+              subtype=0x0,
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo(
+                [
+                  StringTable(
+                    u"040904B0",
+                    [StringStruct(u"CompanyName", u"ARG_OSCI Project"),
+                    StringStruct(u"FileDescription", u"ARG_OSCI Firmware Installer"),
+                    StringStruct(u"FileVersion", u"1.0.0"),
+                    StringStruct(u"InternalName", u"ARG_OSCI_Installer"),
+                    StringStruct(u"LegalCopyright", u"© 2024 ARG_OSCI Project"),
+                    StringStruct(u"OriginalFilename", u"ARG_OSCI_Installer.exe"),
+                    StringStruct(u"ProductName", u"ARG_OSCI Firmware Installer"),
+                    StringStruct(u"ProductVersion", u"1.0.0")])
+                ]
+              ),
+              VarFileInfo([VarStruct(u"Translation", [0x0409, 1200])])
+            ]
+          )' > version_info.txt
           
       - name: Build with PyInstaller
         run: |
-          # Use PNG instead of ICO since Pillow will convert it
-          pyinstaller --onefile --windowed --add-data "ARG_OSCI_ICON.png;." --icon=ARG_OSCI_ICON.png --name ARG_OSCI_Installer installer/installer.py
+          # Use more conservative build options
+          pyinstaller --onefile --windowed ^
+            --version-file=version_info.txt ^
+            --add-data "ARG_OSCI_ICON.png;." ^
+            --icon=ARG_OSCI_ICON.png ^
+            --name ARG_OSCI_Installer ^
+            --exclude-module _bootlocale ^
+            --exclude-module pytest ^
+            --noupx ^
+            installer/installer.py
+            
+      - name: Create installation instructions
+        run: |
+          echo "# ARG_OSCI Firmware Installer
+          
+          ## Installation Instructions
+          
+          1. Extract all files from this ZIP archive
+          2. Double-click on ARG_OSCI_Installer.exe to run the installer
+          
+          ## Note About Security Warnings
+          
+          Windows SmartScreen or your antivirus may flag this installer as potentially unsafe because it's an unsigned application.
+          This is a common false positive for applications built with PyInstaller.
+          
+          To run the installer:
+          1. If Windows SmartScreen appears, click 'More info' and then 'Run anyway'
+          2. If your antivirus blocks it, you may need to temporarily disable it or add an exception
+          
+          ## About ARG_OSCI
+          
+          The ARG_OSCI is an open-source oscilloscope project that transforms your ESP32 into a versatile signal analyzer.
+          
+          This installer will:
+          - Download and configure the ESP32 firmware
+          - Set up the ESP-IDF development environment
+          - Flash the firmware to your ESP32 device
+          
+          For more information and source code, visit [our GitHub repository](https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE)
+          " | Out-File -Encoding utf8 README.txt
+          
+      - name: Generate file hashes
+        run: |
+          # Create hashes file for verification
+          echo "# File Hashes for Verification" > VERIFY.txt
+          echo "Generated on: $(Get-Date)" >> VERIFY.txt
+          echo "" >> VERIFY.txt
+          echo "## SHA-256" >> VERIFY.txt
+          certutil -hashfile dist/ARG_OSCI_Installer.exe SHA256 | Out-File -Append -Encoding utf8 VERIFY.txt
+            
+      - name: Create ZIP package
+        run: |
+          # Create release directory
+          mkdir release
+          copy dist\ARG_OSCI_Installer.exe release\
+          copy README.txt release\
+          copy VERIFY.txt release\
+          copy ARG_OSCI_ICON.png release\
+          
+          # Create ZIP file
+          Compress-Archive -Path release\* -DestinationPath ARG_OSCI_Installer_Windows.zip -Force
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: dist/ARG_OSCI_Installer.exe
+          name: windows-installer-package
+          path: ARG_OSCI_Installer_Windows.zip
           
       - name: Upload to release
         if: github.event_name == 'release'
@@ -43,7 +136,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: dist/ARG_OSCI_Installer.exe
+          files: ARG_OSCI_Installer_Windows.zip
 
   build-linux:
     runs-on: ubuntu-latest
@@ -71,6 +164,55 @@ jobs:
           # Use the correct path to the installer script
           pyinstaller --onefile --add-data "ARG_OSCI_ICON.png:." --name ARG_OSCI_Installer installer/installer.py
           
+          # Modify the binary to minimize GLIBC requirements
+          # Create a wrapper script that will try the AppImage first, and if it fails, use system Python
+          echo '#!/bin/sh
+          SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+          
+          # First try running the bundled app
+          "$SCRIPT_DIR/ARG_OSCI_Installer.bin" "$@"
+          
+          # If it failed with GLIBC error, try with system Python
+          if [ $? -eq 127 ] || [ $? -eq 1 ]; then
+              echo "Attempting to run with system Python..."
+              if command -v python3 >/dev/null 2>&1; then
+                  # Extract the installer script to a temporary file
+                  TEMP_DIR=$(mktemp -d)
+                  cp "$SCRIPT_DIR/ARG_OSCI_ICON.png" "$TEMP_DIR/"
+                  
+                  # Get the installer script from GitHub if possible
+                  if command -v curl >/dev/null 2>&1; then
+                      curl -s https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py > "$TEMP_DIR/installer.py"
+                  elif command -v wget >/dev/null 2>&1; then
+                      wget -q -O "$TEMP_DIR/installer.py" https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py
+                  else
+                      echo "Error: No se pudo descargar el instalador. Por favor, instale curl o wget."
+                      exit 1
+                  fi
+                  
+                  # Run with system Python
+                  cd "$TEMP_DIR" && python3 installer.py
+                  exit_code=$?
+                  
+                  # Clean up
+                  rm -rf "$TEMP_DIR"
+                  exit $exit_code
+              else
+                  echo "Error: Python3 no está instalado en este sistema."
+                  exit 1
+              fi
+          fi
+          ' > dist/ARG_OSCI_Installer_wrapper
+          
+          # Make wrapper executable
+          chmod +x dist/ARG_OSCI_Installer_wrapper
+          
+          # Rename original binary
+          mv dist/ARG_OSCI_Installer dist/ARG_OSCI_Installer.bin
+          
+          # Replace with wrapper
+          mv dist/ARG_OSCI_Installer_wrapper dist/ARG_OSCI_Installer  
+                  
       - name: Create AppDir structure
         run: |
           # Set app name for consistency
