@@ -145,6 +145,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -179,9 +180,10 @@ jobs:
           
           # Copy icon
           cp ARG_OSCI_ICON.png AppDir/usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png
-          
-          # Copy icon to bin directory for the app to find
           cp ARG_OSCI_ICON.png AppDir/usr/bin/
+          
+          # Copy Python script for fallback
+          cp installer/installer.py AppDir/usr/bin/
           
           # Create desktop file
           cat > AppDir/${APP_NAME}.desktop << EOF
@@ -198,7 +200,7 @@ jobs:
           # Copy desktop file to standard location
           cp AppDir/${APP_NAME}.desktop AppDir/usr/share/applications/
           
-          # Create a simpler AppRun script
+          # Create an AppRun script that uses the embedded installer.py
           cat > AppDir/AppRun << 'EOL'
           #!/bin/bash
           HERE="$(dirname "$(readlink -f "${0}")")"
@@ -212,28 +214,10 @@ jobs:
           if [ $? -ne 0 ]; then
               echo "Attempting to run with system Python..."
               if command -v python3 >/dev/null 2>&1; then
-                  # Copy the Python script to a temp directory
-                  TEMP_DIR=$(mktemp -d)
-                  cp "${HERE}/usr/bin/ARG_OSCI_ICON.png" "$TEMP_DIR/"
-                  
-                  # Get the installer from the repository
-                  INSTALLER_URL="https://raw.githubusercontent.com/ArgOsciProyect/ARG_OSCI_INSTALLER/main/installer/installer.py"
-                  if command -v curl >/dev/null 2>&1; then
-                      curl -sL $INSTALLER_URL > "$TEMP_DIR/installer.py" 
-                  elif command -v wget >/dev/null 2>&1; then
-                      wget -q -O "$TEMP_DIR/installer.py" $INSTALLER_URL
-                  else
-                      echo "Error: curl or wget is required for the fallback mode."
-                      exit 1
-                  fi
-                  
-                  # Run the installer with system Python
-                  cd "$TEMP_DIR" && python3 installer.py
-                  exit_code=$?
-                  
-                  # Clean up
-                  rm -rf "$TEMP_DIR"
-                  exit $exit_code
+                  # Use the embedded Python script
+                  echo "Running embedded installer script with system Python"
+                  cd "${HERE}/usr/bin" && python3 installer.py
+                  exit $?
               else
                   echo "Error: Python 3 is not installed. Please install Python 3 and try again."
                   exit 1
@@ -245,10 +229,6 @@ jobs:
           # Link the icon to root for AppImage to find it
           ln -sf usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png AppDir/${APP_NAME}.png
           
-          # List contents to verify
-          echo "AppDir contents:"
-          find AppDir -type f | sort
-          
       - name: Download AppImage tools
         run: |
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -258,7 +238,7 @@ jobs:
         run: |
           # Create the AppImage with --no-appstream to bypass validation
           ARCH=x86_64 ./appimagetool-x86_64.AppImage --no-appstream AppDir ARG_OSCI_Installer-x86_64.AppImage
-      
+        
       - name: Create installation instructions
         run: |
           cat > README.txt << 'EOF'
@@ -266,52 +246,240 @@ jobs:
   
           ## Installation Instructions
   
-          ### Method 1: Run directly
-          1. Right-click the AppImage file and select "Properties"
-          2. Go to the "Permissions" tab and check "Allow executing file as program"
-          3. Close the properties window and double-click the AppImage to run it
+          ### Method 1: Using the run script (Recommended)
+          1. Extract all files from this ZIP archive
+          2. Open a terminal in the directory containing the extracted files
+          3. Run the helper script: `./run.sh`
   
-          ### Method 2: Terminal
+          ### Method 2: Manual execution
           1. Open a terminal in the directory containing the AppImage
-          2. Run: `chmod +x ARG_OSCI_Installer-x86_64.AppImage`
-          3. Run: `./ARG_OSCI_Installer-x86_64.AppImage`
-  
-          ### Using the helper script
-          A helper script is included to make launching easier:
-          1. Open a terminal in the directory containing the extracted files
-          2. Run: `./run.sh`
+          2. Make the AppImage executable: `chmod +x ARG_OSCI_Installer-x86_64.AppImage`
+          3. Run it: `./ARG_OSCI_Installer-x86_64.AppImage`
   
           ### Troubleshooting
-          If the AppImage doesn't work, the installer will automatically fall back to using your system's Python:
-          1. Make sure Python 3.6+ is installed (`sudo apt install python3 python3-pip`)
-          2. Make sure you have the required Python packages: 
-             `pip3 install --user requests pyserial pillow`
-  
+          If the AppImage doesn't work:
+          
+          1. The script will automatically try to run using your system's Python
+          2. Make sure Python 3.6+ is installed:
+             - Ubuntu/Debian: `sudo apt install python3 python3-pip python3-tk`
+             - Fedora: `sudo dnf install python3 python3-pip python3-tkinter`
+             - Arch Linux: `sudo pacman -S python python-pip python-tk`
+          
           ## About ARG_OSCI
+          
           The ARG_OSCI is an open-source oscilloscope project that transforms your ESP32 into a versatile signal analyzer.
-  
+          
           For more information and source code, visit [our GitHub repository](https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE)
           EOF
           
-      - name: Create helper script
+      - name: Create comprehensive helper script
         run: |
           cat > run.sh << 'EOF'
           #!/bin/bash
-          # Helper script to make the AppImage executable and run it
-  
+          # Comprehensive launcher script for ARG_OSCI Installer
+          
           # Get the directory this script is in
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
           APPIMAGE="${SCRIPT_DIR}/ARG_OSCI_Installer-x86_64.AppImage"
-  
-          # Make sure the AppImage is executable
-          chmod +x "${APPIMAGE}"
-          echo "Made AppImage executable"
-  
-          # Run the installer
-          echo "Running ARG_OSCI Installer..."
-          "${APPIMAGE}"
+          PYTHON_SCRIPT="${SCRIPT_DIR}/installer.py"
+          ICON="${SCRIPT_DIR}/ARG_OSCI_ICON.png"
+          
+          # Text formatting
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[0;33m'
+          BLUE='\033[0;34m'
+          BOLD='\033[1m'
+          NORM='\033[0m'
+          
+          echo -e "${BLUE}${BOLD}ARG_OSCI Installer Launcher${NORM}\n"
+          echo -e "This script will help you run the ARG_OSCI installer.\n"
+          
+          # Check for required system tools
+          check_dependency() {
+            local cmd=$1
+            local package=$2
+            local install_cmd=$3
+            
+            if ! command -v $cmd &> /dev/null; then
+              echo -e "${YELLOW}Warning: $cmd is not installed${NORM}"
+              echo -e "This may be needed for proper operation of the installer."
+              echo -e "Install it with: ${BOLD}$install_cmd${NORM}"
+              return 1
+            else
+              echo -e "${GREEN}✓ $cmd is installed${NORM}"
+              return 0
+            fi
+          }
+          
+          # Check for GLIBC version
+          check_glibc() {
+            local glibc_version=$(ldd --version | head -n1 | grep -oE '[0-9]+\.[0-9]+$')
+            echo -e "GLIBC version: $glibc_version"
+            
+            # Version comparison - convert to comparable integer (e.g., 2.31 -> 231)
+            local version_num=$(echo $glibc_version | awk -F. '{ printf "%d%02d\n", $1, $2 }')
+            
+            if [ "$version_num" -lt 230 ]; then
+              echo -e "${YELLOW}Warning: Your GLIBC version is older than 2.30${NORM}"
+              echo -e "The AppImage might not work. We'll try Python script if AppImage fails."
+              return 1
+            else
+              echo -e "${GREEN}✓ GLIBC version is adequate${NORM}"
+              return 0
+            fi
+          }
+          
+          echo -e "${BOLD}Checking system dependencies...${NORM}"
+          
+          # Distribution detection
+          if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            DISTRO=$NAME
+            echo -e "Detected distribution: ${BOLD}$DISTRO${NORM}"
+          else
+            DISTRO="Unknown"
+            echo -e "Unknown distribution"
+          fi
+          
+          # Set package installation commands based on distribution
+          if command -v apt-get &> /dev/null; then
+            # Debian/Ubuntu
+            PYTHON_INSTALL="sudo apt-get install -y python3 python3-pip"
+            GIT_INSTALL="sudo apt-get install -y git"
+            TKINTER_INSTALL="sudo apt-get install -y python3-tk"
+          elif command -v dnf &> /dev/null; then
+            # Fedora/RHEL
+            PYTHON_INSTALL="sudo dnf install -y python3 python3-pip"
+            GIT_INSTALL="sudo dnf install -y git"
+            TKINTER_INSTALL="sudo dnf install -y python3-tkinter"
+          elif command -v pacman &> /dev/null; then
+            # Arch Linux
+            PYTHON_INSTALL="sudo pacman -S --noconfirm python python-pip"
+            GIT_INSTALL="sudo pacman -S --noconfirm git"
+            TKINTER_INSTALL="sudo pacman -S --noconfirm python-tk"
+          elif command -v zypper &> /dev/null; then
+            # openSUSE
+            PYTHON_INSTALL="sudo zypper install -y python3 python3-pip"
+            GIT_INSTALL="sudo zypper install -y git"
+            TKINTER_INSTALL="sudo zypper install -y python3-tk"
+          else
+            echo -e "${YELLOW}Warning: Unable to determine package manager for your distribution.${NORM}"
+            echo -e "You may need to manually install dependencies if the installer fails."
+            PYTHON_INSTALL="Please install Python 3 manually"
+            GIT_INSTALL="Please install Git manually"
+            TKINTER_INSTALL="Please install Python Tkinter manually"
+          fi
+          
+          # Check for Python
+          PYTHON_OK=$(check_dependency python3 "Python 3" "$PYTHON_INSTALL")
+          PYTHON_OK_STATUS=$?
+          
+          # Check for Git (needed for ESP-IDF)
+          GIT_OK=$(check_dependency git "Git" "$GIT_INSTALL")
+          GIT_OK_STATUS=$?
+          
+          # Check GLIBC version for AppImage compatibility
+          GLIBC_OK=$(check_glibc)
+          GLIBC_OK_STATUS=$?
+          
+          echo -e "\n${BOLD}Checking Python packages...${NORM}"
+          
+          # Function to check if a Python package is installed
+          check_python_package() {
+            local package=$1
+            if python3 -c "import $package" &>/dev/null; then
+              echo -e "${GREEN}✓ Python package '$package' is installed${NORM}"
+              return 0
+            else
+              echo -e "${YELLOW}Warning: Python package '$package' is not installed${NORM}"
+              return 1
+            fi
+          }
+          
+          # Check essential Python packages
+          MISSING_PACKAGES=0
+          check_python_package tkinter || MISSING_PACKAGES=1
+          check_python_package requests 2>/dev/null || MISSING_PACKAGES=1
+          check_python_package serial 2>/dev/null || MISSING_PACKAGES=1
+          check_python_package PIL 2>/dev/null || MISSING_PACKAGES=1
+          
+          echo -e "\n${BOLD}Launching installer...${NORM}"
+          
+          # First attempt: Try running the AppImage directly if GLIBC is compatible
+          if [ "$GLIBC_OK_STATUS" -eq 0 ] && [ -f "$APPIMAGE" ]; then
+            echo -e "Attempting to run AppImage..."
+            chmod +x "${APPIMAGE}"
+            "${APPIMAGE}" &
+            APPIMAGE_PID=$!
+            
+            # Wait a bit to see if AppImage starts successfully
+            sleep 3
+            if ps -p $APPIMAGE_PID > /dev/null; then
+              echo -e "${GREEN}AppImage started successfully!${NORM}"
+              wait $APPIMAGE_PID
+              exit 0
+            else
+              echo -e "${YELLOW}AppImage execution failed, trying Python fallback...${NORM}"
+            fi
+          else
+            echo -e "${YELLOW}Skipping AppImage due to system incompatibility${NORM}"
+          fi
+          
+          # Second attempt: Try running the Python script directly
+          if [ -f "$PYTHON_SCRIPT" ] && [ "$PYTHON_OK_STATUS" -eq 0 ]; then
+            echo -e "Running installer with Python directly..."
+            
+            # Install required packages if needed
+            if [ "$MISSING_PACKAGES" -eq 1 ]; then
+              echo -e "${YELLOW}Installing missing Python packages...${NORM}"
+              python3 -m pip install --user requests pyserial pillow 2>/dev/null
+              
+              # Check if tkinter is missing and recommend system package
+              if ! python3 -c "import tkinter" &>/dev/null; then
+                echo -e "${YELLOW}Tkinter is required but cannot be installed via pip.${NORM}"
+                echo -e "Install it with: ${BOLD}$TKINTER_INSTALL${NORM}"
+                
+                # Ask if user wants to try installing tkinter
+                read -p "Would you like to try installing tkinter now? (y/n) " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                  $TKINTER_INSTALL
+                fi
+              fi
+            fi
+            
+            # Check if icon exists and copy it if needed
+            if [ -f "$ICON" ]; then
+              # Ensure the script can find the icon in the current directory
+              cp "$ICON" "$(dirname "$PYTHON_SCRIPT")/"
+            fi
+            
+            # Run the installer script
+            cd "$(dirname "$PYTHON_SCRIPT")"
+            python3 "$PYTHON_SCRIPT"
+            exit $?
+          fi
+          
+          # If we get here, both AppImage and Python failed
+          echo -e "${RED}${BOLD}Error: Could not launch the installer${NORM}"
+          echo -e "Please ensure you have the following installed:"
+          echo -e "1. Python 3.6 or later"
+          echo -e "2. Required Python packages: tkinter, requests, pyserial, pillow"
+          echo -e "3. Git"
+          
+          echo -e "\nInstallation commands for your system:"
+          echo -e "${BOLD}Python:${NORM} $PYTHON_INSTALL"
+          echo -e "${BOLD}Tkinter:${NORM} $TKINTER_INSTALL"
+          echo -e "${BOLD}Git:${NORM} $GIT_INSTALL"
+          echo -e "${BOLD}Python packages:${NORM} python3 -m pip install --user requests pyserial pillow"
+          
+          exit 1
           EOF
           chmod +x run.sh
+          
+          # Copy installer.py for fallback
+          cp installer/installer.py ./
           
       - name: Create ZIP package
         run: |
@@ -321,17 +489,16 @@ jobs:
           echo "" >> VERIFY.txt
           echo "## SHA-256" >> VERIFY.txt
           sha256sum ARG_OSCI_Installer-x86_64.AppImage >> VERIFY.txt
+          sha256sum installer.py >> VERIFY.txt
           
           # Package everything together
-          zip ARG_OSCI_Installer_Linux.zip ARG_OSCI_Installer-x86_64.AppImage README.txt VERIFY.txt run.sh ARG_OSCI_ICON.png
+          zip ARG_OSCI_Installer_Linux.zip ARG_OSCI_Installer-x86_64.AppImage README.txt VERIFY.txt run.sh ARG_OSCI_ICON.png installer.py
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-installer-package
-          path: |
-            ARG_OSCI_Installer_Linux.zip
-            ARG_OSCI_Installer-x86_64.AppImage
+          path: ARG_OSCI_Installer_Linux.zip
           
       - name: Upload to release
         if: github.event_name == 'release'
@@ -339,6 +506,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: |
-            ARG_OSCI_Installer_Linux.zip
-            ARG_OSCI_Installer-x86_64.AppImage
+          files: ARG_OSCI_Installer_Linux.zip
