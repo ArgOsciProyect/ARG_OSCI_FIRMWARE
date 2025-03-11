@@ -423,7 +423,7 @@ double get_sampling_frequency(void)
 #ifdef USE_EXTERNAL_ADC
     return 2500000; // Frecuencia de muestreo para ADC externo
 #else
-    return 494753; // Frecuencia de muestreo para ADC interno
+    return 496490; // Frecuencia de muestreo para ADC interno
 #endif
 }
 
