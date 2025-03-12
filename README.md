@@ -1,4 +1,5 @@
 # ESP32 ARG_OSCI Firmware
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ESP32 ARG_OSCI Firmware transforms your ESP32 into a versatile digital oscilloscope capable of capturing and transmitting analog signals in real-time. It pairs with the ARG_OSCI desktop and mobile application to create a complete signal visualization solution.
@@ -10,6 +11,7 @@ This firmware converts your ESP32 into a fully functional digital oscilloscope w
 ### Hardware Setup
 
 **Requirements:**
+
 - ESP32 development board
 - Optional: External ADC for higher sampling rates (via SPI)
 - Input signal conditioning circuit (recommended for protecting ESP32 inputs)
@@ -18,11 +20,13 @@ This firmware converts your ESP32 into a fully functional digital oscilloscope w
 **Connection Diagram:**
 
 For internal ADC mode:
+
 - Connect signal input to GPIO pin defined in `SINGLE_INPUT_PIN` (default: GPIO19)
 - 1kHz square wave calibration signal available on `SQUARE_WAVE_GPIO` (default: GPIO18)
 - Trigger level output on `TRIGGER_PWM_GPIO` (default: GPIO26)
 
 For external ADC mode:
+
 - Connect external ADC to SPI pins:
   - MISO: GPIO12
   - SCLK: GPIO14
@@ -31,6 +35,7 @@ For external ADC mode:
 ### How to Get Started
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/ArgOsciProyect/ARG_OSCI_FIRMWARE
    cd ARG_OSCI_FIRMWARE
@@ -42,6 +47,7 @@ For external ADC mode:
    - Keep or add this definition to use an external ADC
 
 3. **Build and flash:**
+
    ```bash
    idf.py build
    idf.py -p [PORT] flash monitor
@@ -85,11 +91,13 @@ For external ADC configuration, modify the SPI parameters in the `spi_matrix` de
 ### Troubleshooting
 
 If you encounter connection issues:
+
 - Ensure the ESP32 is powered and operational (The LED should be on)
 - Verify you're connected to the "ESP32_AP" WiFi network
 - Check serial output for error messages using `idf.py monitor`
 
 For acquisition problems:
+
 - Make sure input signal is within the acceptable voltage range
 - Try adjusting the trigger level if using single mode
 - Reduce or increase sampling rate for more stable operation
@@ -108,6 +116,7 @@ The codebase follows a modular design with clear separation of concerns. Key are
 - **Hardware Support:** Adding compatibility with additional ESP32 variants and external components
 
 To get started, familiarize yourself with the project structure. Core modules include:
+
 - `acquisition.c`: Handles signal sampling and buffer management
 - `network.c`: Manages WiFi connectivity and client communications
 - `data_transmission.c`: Handles the formatting and sending of data packets
