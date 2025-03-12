@@ -6,8 +6,8 @@
  * interactions, configuration, and control of the oscilloscope functionality.
  */
 
-#ifndef WEBSERVER_H
-#define WEBSERVER_H
+#ifndef WEBSERVERS_H // Change from WEBSERVER_H to WEBSERVERS_H for consistency
+#define WEBSERVERS_H
 
 #include <cJSON.h>
 #include <errno.h>
@@ -65,8 +65,9 @@ esp_err_t scan_wifi_handler(httpd_req_t *req);
 /**
  * @brief Handler for testing encrypted communication
  *
- * Receives an encrypted message, decrypts it, and returns the decrypted
- * content. Used to verify security functionality.
+ * Receives an encrypted message, decrypts it using the device's private key,
+ * and returns the decrypted content as JSON. This endpoint is used to verify
+ * the secure communication channel is working properly.
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
@@ -110,6 +111,7 @@ esp_err_t freq_handler(httpd_req_t *req);
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
+ * @note Returns JSON with format: {"IP": "xxx.xxx.xxx.xxx", "Port": xxxx}
  */
 esp_err_t reset_socket_handler(httpd_req_t *req);
 
@@ -134,9 +136,10 @@ esp_err_t normal_handler(httpd_req_t *req);
 esp_err_t connect_wifi_handler(httpd_req_t *req);
 
 /**
- * @brief Handler to provide public key for secure communication
+ * @brief Handler to provide RSA public key for secure communication
  *
- * Returns the RSA public key for encrypting messages to the device.
+ * Returns the device's RSA public key in PEM format for encrypting messages
+ * to the device. Includes CORS headers to allow cross-origin requests.
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
@@ -184,8 +187,7 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config);
  * @param new_port Port number
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str,
-                                      int new_port);
+esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str, int new_port);
 
 /**
  * @brief Send WiFi connection result
@@ -198,7 +200,6 @@ esp_err_t send_internal_mode_response(httpd_req_t *req, const char *ip_str,
  * @param success Whether connection was successful
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t send_wifi_response(httpd_req_t *req, const char *ip, int port,
-                             bool success);
+esp_err_t send_wifi_response(httpd_req_t *req, const char *ip, int port, bool success);
 
-#endif /* WEBSERVER_H */
+#endif /* WEBSERVERS_H */

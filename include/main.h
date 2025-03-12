@@ -22,7 +22,16 @@
  * @brief Main application entry point
  *
  * Initializes all subsystems and starts the various tasks required
- * for the oscilloscope functionality.
+ * for the oscilloscope functionality:
+ * - NVS (Non-Volatile Storage) for configuration
+ * - Network stack and event loop
+ * - Cryptography subsystem and RSA key generation
+ * - Signal generators (sine, square wave, PWM)
+ * - ADC (internal or external via SPI)
+ * - GPIO for triggers and status LEDs
+ * - WiFi in AP+STA mode
+ * - HTTP servers
+ * - Data transmission subsystem
  */
 void app_main(void);
 

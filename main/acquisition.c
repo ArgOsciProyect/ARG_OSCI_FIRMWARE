@@ -26,6 +26,19 @@ uint64_t wait_time_us;
 pcnt_unit_handle_t pcnt_unit;
 pcnt_channel_handle_t pcnt_chan;
 
+static const voltage_scale_t voltage_scales[] = {
+    {400.0, "200V, -200V"}, {120.0, "60V, -60V"}, {24.0, "12V, -12V"}, {6.0, "3V, -3V"}, {1.0, "500mV, -500mV"}};
+
+int get_voltage_scales_count(void)
+{
+    return sizeof(voltage_scales) / sizeof(voltage_scales[0]);
+}
+
+const voltage_scale_t *get_voltage_scales(void)
+{
+    return voltage_scales;
+}
+
 #ifdef USE_EXTERNAL_ADC
 SemaphoreHandle_t spi_mutex = NULL;
 
@@ -373,7 +386,7 @@ void init_sine_wave(void)
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
         .chan_id = DAC_CHAN_1,
-        .freq_hz = 10000, // Frecuencia de la señal senoidal en Hz
+        .freq_hz = 20000, // Frecuencia de la señal senoidal en Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,
         .phase = DAC_COSINE_PHASE_0,

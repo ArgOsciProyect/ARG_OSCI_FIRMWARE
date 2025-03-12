@@ -53,8 +53,8 @@ void socket_task(void *pvParameters);
  * @param samples_per_packet Number of samples to send
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t send_data_packet(int client_sock, uint8_t *buffer, size_t sample_size,
-                           int discard_head, int samples_per_packet);
+esp_err_t send_data_packet(int client_sock, uint8_t *buffer, size_t sample_size, int discard_head,
+                           int samples_per_packet);
 
 /**
  * @brief Switch to single trigger acquisition mode
@@ -89,15 +89,15 @@ bool is_triggered(int current, int last);
 /**
  * @brief Acquire data from the configured ADC
  *
- * Reads data from either the internal or external ADC based on
- * the current configuration.
+ * Reads data from either the internal ADC (via adc_continuous_read) or
+ * external ADC (via SPI) based on the current configuration. When using
+ * external ADC, this function manages SPI mutex access.
  *
  * @param buffer Buffer to store the acquired data
  * @param buffer_size Size of the buffer in bytes
  * @param bytes_read Pointer to variable that will hold number of bytes read
- * @return ESP_OK on success, ESP_FAIL on error
+ * @return ESP_OK on success, ESP_FAIL or error code on failure
  */
-esp_err_t acquire_data(uint8_t *buffer, size_t buffer_size,
-                       uint32_t *bytes_read);
+esp_err_t acquire_data(uint8_t *buffer, size_t buffer_size, uint32_t *bytes_read);
 
 #endif /* DATA_TRANSMISSION_H */

@@ -38,6 +38,25 @@ esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "max_bits", get_max_bits());
     cJSON_AddNumberToObject(config, "mid_bits", get_mid_bits());
 
+    // Crear el array de escalas de voltaje
+    cJSON *voltage_scales_array = cJSON_CreateArray();
+    if (voltage_scales_array != NULL) {
+        const voltage_scale_t *scales = get_voltage_scales();
+        int count = get_voltage_scales_count();
+
+        // Añadir cada escala al array
+        for (int i = 0; i < count; i++) {
+            cJSON *scale = cJSON_CreateObject();
+            if (scale != NULL) {
+                cJSON_AddNumberToObject(scale, "baseRange", scales[i].baseRange);
+                cJSON_AddStringToObject(scale, "displayName", scales[i].displayName);
+                cJSON_AddItemToArray(voltage_scales_array, scale);
+            }
+        }
+
+        cJSON_AddItemToObject(config, "voltage_scales", voltage_scales_array);
+    }
+
     const char *response = cJSON_Print(config);
     esp_err_t ret = httpd_resp_send(req, response, strlen(response));
 

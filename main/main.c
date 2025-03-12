@@ -13,8 +13,7 @@
 
 static const char *TAG = "MAIN";
 
-// Definición de variables globales declaradas como externas en globals.h
-TaskHandle_t socket_task_handle = NULL;
+TaskHandle_t socket_task_handle; /**< Handle to the socket communication task */
 
 void app_main(void)
 {

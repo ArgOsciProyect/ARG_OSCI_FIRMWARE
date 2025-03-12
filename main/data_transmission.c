@@ -1,5 +1,5 @@
 /**
- * @file dataTransmission.c
+ * @file data_transmission.c
  * @brief Implementation of data transmission functions
  */
 
@@ -10,10 +10,25 @@
 
 static const char *TAG = "DATA_TRANS";
 
-atomic_int mode = ATOMIC_VAR_INIT(0); // Default to continuous mode
-atomic_int last_state = ATOMIC_VAR_INIT(0); // Initial state
-atomic_int current_state = ATOMIC_VAR_INIT(0); // Current state
-atomic_int trigger_edge = ATOMIC_VAR_INIT(1); // Default to positive edge trigger
+/**
+ * @brief Acquisition mode (0: continuous, 1: single trigger)
+ */
+atomic_int mode = ATOMIC_VAR_INIT(0); 
+
+/**
+ * @brief Previous state of trigger input
+ */
+atomic_int last_state = ATOMIC_VAR_INIT(0);
+
+/**
+ * @brief Current state of trigger input
+ */
+atomic_int current_state = ATOMIC_VAR_INIT(0);
+
+/**
+ * @brief Trigger edge type (1: positive edge, 0: negative edge)
+ */
+atomic_int trigger_edge = ATOMIC_VAR_INIT(1);
 
 esp_err_t data_transmission_init(void)
 {

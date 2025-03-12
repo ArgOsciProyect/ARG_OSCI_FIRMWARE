@@ -11,9 +11,6 @@
 #ifndef ACQUISITION_H
 #define ACQUISITION_H
 
-#include "driver/adc.h"
-#include "driver/dac_cosine.h"
-#include "esp_adc/adc_continuous.h"
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <driver/mcpwm_prelude.h>
@@ -27,6 +24,40 @@
 #include <freertos/task.h>
 #include <stdatomic.h>
 #include <string.h>
+#include "driver/adc.h"
+#include "driver/dac_cosine.h"
+#include "esp_adc/adc_continuous.h"
+
+/**
+ * @brief Structure defining a voltage scale setting
+ *
+ * Contains the base range value and display name for a voltage scale setting.
+ * The baseRange defines the full scale voltage range (peak-to-peak),
+ * while displayName provides a human-readable description.
+ */
+typedef struct {
+    double baseRange; /**< Base voltage range in volts (peak-to-peak) */
+    const char *displayName; /**< Display name for the voltage scale */
+} voltage_scale_t;
+
+/**
+ * @brief Get the voltage scale information
+ *
+ * Returns an array of voltage_scale_t structures containing information about
+ * the available voltage scales for the oscilloscope display.
+ *
+ * @return Pointer to array of voltage_scale_t structures
+ */
+const voltage_scale_t *get_voltage_scales(void);
+
+/**
+ * @brief Get the number of available voltage scales
+ *
+ * Returns the number of entries in the voltage_scales array.
+ *
+ * @return Number of available voltage scales
+ */
+int get_voltage_scales_count(void);
 
 /**
  * @brief Initialize the SPI master for external ADC communication
@@ -147,12 +178,8 @@ void dac_sine_wave_task(void *pvParameters);
 /**
  * @brief Set the trigger level reference voltage
  *
- * Adjusts the duty cycle of the trigger PWM output to set a reference
- * voltage for the trigger comparator. The percentage value is converted
- * to a duty cycle in the range 0-1023 (10-bit resolution).
- *
- * @param percentage Trigger level as percentage (0-100)
- * @return ESP_OK on success, ESP_FAIL on error or invalid percentage
+ * @param percentage Trigger level as percentage (0-100), where 0 represents
+ *                   the minimum voltage and 100 represents the maximum voltage
  */
 esp_err_t set_trigger_level(int percentage);
 
@@ -160,7 +187,6 @@ esp_err_t set_trigger_level(int percentage);
  * @brief Get the configured sampling frequency
  *
  * Returns the base sampling frequency before any divider is applied.
- * 2.5 MHz for external ADC, 494.753 kHz for internal ADC.
  *
  * @return Sampling frequency in Hz
  */
@@ -240,7 +266,6 @@ int get_samples_per_packet(void);
 /**
  * @brief Get the maximum possible ADC reading value
  *
- * Returns 675 for external ADC, 1023 for internal ADC.
  * These values represent the maximum possible ADC output value.
  *
  * @return Maximum ADC bit value

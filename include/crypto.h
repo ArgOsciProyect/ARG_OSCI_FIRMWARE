@@ -37,8 +37,7 @@
  * length)
  * @return 0 on success, mbedTLS error code on failure
  */
-int decrypt_with_private_key(unsigned char *input, size_t input_len,
-                             unsigned char *output, size_t *output_len);
+int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len);
 
 /**
  * @brief Decrypt a Base64-encoded encrypted message
@@ -51,8 +50,7 @@ int decrypt_with_private_key(unsigned char *input, size_t input_len,
  * @param output_size Size of output buffer
  * @return ESP_OK on success, ESP_FAIL on failure
  */
-esp_err_t decrypt_base64_message(const char *encrypted_base64,
-                                 char *decrypted_output, size_t output_size);
+esp_err_t decrypt_base64_message(const char *encrypted_base64, char *decrypted_output, size_t output_size);
 
 /**
  * @brief Task that generates RSA key pair on startup
