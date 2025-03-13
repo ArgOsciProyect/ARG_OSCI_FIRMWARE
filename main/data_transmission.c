@@ -129,6 +129,11 @@ esp_err_t set_continuous_mode(void)
 
     mode = 0; // Set to continuous mode
 
+    esp_err_t ret = set_trigger_level(0); // Reset trigger level
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set trigger level");
+    }
+
 #ifdef USE_EXTERNAL_ADC
     ESP_ERROR_CHECK(pcnt_unit_stop(pcnt_unit));
 #endif

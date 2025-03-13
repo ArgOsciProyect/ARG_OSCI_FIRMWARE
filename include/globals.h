@@ -22,7 +22,7 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_continuous.h"
 
-// #define USE_EXTERNAL_ADC // Comment to use internal ADC
+#define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"

@@ -378,6 +378,11 @@ void init_trigger_pwm(void)
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
     ESP_LOGI(TAG, "Trigger PWM initialized with frequency: %d Hz", TRIGGER_PWM_FREQ);
+
+    esp_err_t ret = set_trigger_level(0); // Inicializar el nivel de trigger en 0%
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set trigger level");
+    }
 }
 
 void init_sine_wave(void)

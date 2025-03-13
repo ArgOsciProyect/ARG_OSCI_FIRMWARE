@@ -226,14 +226,16 @@ esp_err_t trigger_handler(httpd_req_t *req)
     }
 
     int percentage = (int)trigger->valuedouble;
-    esp_err_t ret = set_trigger_level(percentage);
+    esp_err_t ret = ESP_OK;
+    if(mode == 1){
+        ret = set_trigger_level(percentage);
 
-    cJSON_Delete(root);
+        cJSON_Delete(root);
 
-    if (ret != ESP_OK) {
-        return httpd_resp_send_500(req);
+        if (ret != ESP_OK) {
+            return httpd_resp_send_500(req);
+        }
     }
-
     // Enviar respuesta de éxito
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "set_percentage", percentage);
