@@ -124,10 +124,11 @@ extern SemaphoreHandle_t key_gen_semaphore;
 extern uint64_t wait_time_us;
 
 #ifndef USE_EXTERNAL_ADC
-extern SemaphoreHandle_t spi_mutex;
 extern atomic_int wifi_operation_requested;
 extern atomic_int wifi_operation_acknowledged;
 extern atomic_bool adc_is_running;
+#else
+extern SemaphoreHandle_t spi_mutex;
 #endif
 
 /* Define SPI matrix content */
