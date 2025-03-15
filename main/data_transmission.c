@@ -13,7 +13,7 @@ static const char *TAG = "DATA_TRANS";
 /**
  * @brief Acquisition mode (0: continuous, 1: single trigger)
  */
-atomic_int mode = ATOMIC_VAR_INIT(0); 
+atomic_int mode = ATOMIC_VAR_INIT(0);
 
 /**
  * @brief Previous state of trigger input
@@ -29,6 +29,10 @@ atomic_int current_state = ATOMIC_VAR_INIT(0);
  * @brief Trigger edge type (1: positive edge, 0: negative edge)
  */
 atomic_int trigger_edge = ATOMIC_VAR_INIT(1);
+
+// Add at the top of data_transmission.c with other atomic variables
+atomic_int wifi_operation_requested = ATOMIC_VAR_INIT(0);
+atomic_int wifi_operation_acknowledged = ATOMIC_VAR_INIT(0);
 
 esp_err_t data_transmission_init(void)
 {
@@ -168,6 +172,69 @@ esp_err_t send_data_packet(int client_sock, uint8_t *buffer, size_t sample_size,
     return ESP_OK;
 }
 
+// Add these variables to data_transmission.c (at the top with other global variables)
+static uint8_t *pending_send_buffer = NULL;
+static size_t pending_send_size = 0;
+static size_t pending_send_offset = 0;
+static bool send_in_progress = false;
+
+// Non-blocking send function
+esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags)
+{
+    // If first send or previous send completed
+    if (!send_in_progress) {
+        // Store the buffer info for potential retries
+        pending_send_buffer = buffer;
+        pending_send_size = len;
+        pending_send_offset = 0;
+        send_in_progress = true;
+
+        // Make socket non-blocking for this operation
+        int sock_flags = fcntl(client_sock, F_GETFL, 0);
+        fcntl(client_sock, F_SETFL, sock_flags | O_NONBLOCK);
+    }
+
+    // Try to send remaining data
+    while (pending_send_offset < pending_send_size) {
+        // Check for WiFi operation requests
+        if (atomic_load(&wifi_operation_requested)) {
+            // Reset socket to blocking mode before returning
+            int sock_flags = fcntl(client_sock, F_GETFL, 0);
+            fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+            send_in_progress = false;
+            return ESP_ERR_TIMEOUT; // Signal caller to handle the WiFi operation
+        }
+
+        ssize_t sent = send(client_sock, pending_send_buffer + pending_send_offset,
+                            pending_send_size - pending_send_offset, flags);
+
+        if (sent > 0) {
+            pending_send_offset += sent;
+        } else if (sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Socket buffer is full, wait a bit
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+
+            // Actual error
+            ESP_LOGE(TAG, "Send error: errno %d", errno);
+
+            // Reset socket to blocking mode
+            int sock_flags = fcntl(client_sock, F_GETFL, 0);
+            fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+            send_in_progress = false;
+            return ESP_FAIL;
+        }
+    }
+
+    // Reset socket to blocking mode
+    int sock_flags = fcntl(client_sock, F_GETFL, 0);
+    fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+    send_in_progress = false;
+    return ESP_OK;
+}
+
 void socket_task(void *pvParameters)
 {
     struct sockaddr_in client_addr;
@@ -201,6 +268,31 @@ void socket_task(void *pvParameters)
     int flags = MSG_MORE;
 
     while (1) {
+#ifndef USE_EXTERNAL_ADC
+        // Check for WiFi operation request at the beginning of each loop
+        if (atomic_load(&wifi_operation_requested)) {
+            ESP_LOGI(TAG, "WiFi operation requested, pausing ADC operations");
+
+            // Safely stop ADC if it's running
+            if (atomic_load(&adc_is_running)) {
+                stop_adc_sampling();
+            }
+
+            // Acknowledge the request
+            atomic_store(&wifi_operation_acknowledged, 1);
+
+            // Wait until the WiFi operation is complete
+            while (atomic_load(&wifi_operation_requested)) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+
+            // Reset acknowledgment
+            atomic_store(&wifi_operation_acknowledged, 0);
+
+            ESP_LOGI(TAG, "Resuming ADC operations after WiFi change");
+        }
+#endif
+
         if (new_sock == -1) {
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             continue;
@@ -225,6 +317,11 @@ void socket_task(void *pvParameters)
 
         while (1) {
 #ifndef USE_EXTERNAL_ADC
+            // Check for WiFi operation request inside the inner loop as well
+            if (atomic_load(&wifi_operation_requested)) {
+                break; // Break the inner loop to handle this at the outer loop level
+            }
+
             if (adc_modify_freq) {
                 config_adc_sampling();
                 adc_modify_freq = 0;
@@ -233,7 +330,6 @@ void socket_task(void *pvParameters)
 
             if (mode == 1) {
 #ifdef USE_EXTERNAL_ADC
-
                 if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
                     ret = spi_device_polling_transmit(spi, &t);
                     if (ret != ESP_OK) {
@@ -267,7 +363,6 @@ void socket_task(void *pvParameters)
                     }
                 }
                 continue;
-
 #else
                 TickType_t xLastWakeTime = xTaskGetTickCount();
                 current_state = gpio_get_level(SINGLE_INPUT_PIN);
@@ -287,14 +382,12 @@ void socket_task(void *pvParameters)
                 vTaskDelay(pdMS_TO_TICKS(wait_convertion_time / 2) - (xCurrentTime - xLastWakeTime));
                 int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
                 if (ret == ESP_OK && len > 0) {
-                    // Prepare data for sending
-                    ssize_t sent = send(client_sock, send_buffer, send_len, flags);
-                    if (sent < 0) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            vTaskDelay(pdMS_TO_TICKS(10));
-                            continue;
-                        }
-                        ESP_LOGE(TAG, "Send error: errno %d", errno);
+                    // Use non-blocking send
+                    esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
+                    if (send_result == ESP_ERR_TIMEOUT) {
+                        break; // Break the inner loop to handle WiFi operation
+                    } else if (send_result != ESP_OK) {
+                        ESP_LOGE(TAG, "Send error");
                         break;
                     }
                 } else {
@@ -317,10 +410,6 @@ void socket_task(void *pvParameters)
                 }
                 xSemaphoreGive(spi_mutex);
             }
-#else
-            vTaskDelay(pdMS_TO_TICKS(wait_convertion_time));
-            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
-#endif
 
             if (ret == ESP_OK && len > 0) {
                 // Prepare data for sending
@@ -341,6 +430,28 @@ void socket_task(void *pvParameters)
                     read_miss_count = 0;
                 }
             }
+#else
+            vTaskDelay(pdMS_TO_TICKS(wait_convertion_time));
+            int ret = adc_continuous_read(adc_handle, buffer, BUF_SIZE, &len, 1000 / portTICK_PERIOD_MS);
+
+            if (ret == ESP_OK && len > 0) {
+                // Use non-blocking send for continuous mode
+                esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
+                if (send_result == ESP_ERR_TIMEOUT) {
+                    break; // Break the inner loop to handle WiFi operation
+                } else if (send_result != ESP_OK) {
+                    ESP_LOGE(TAG, "Send error");
+                    break;
+                }
+            } else {
+                read_miss_count++;
+                ESP_LOGW(TAG, "Missed ADC readings! Count: %d", read_miss_count);
+                if (read_miss_count >= 10) {
+                    ESP_LOGE(TAG, "Critical ADC or SPI data loss detected.");
+                    read_miss_count = 0;
+                }
+            }
+#endif
         }
 
 #ifndef USE_EXTERNAL_ADC

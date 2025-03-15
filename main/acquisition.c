@@ -26,6 +26,8 @@ uint64_t wait_time_us;
 pcnt_unit_handle_t pcnt_unit;
 pcnt_channel_handle_t pcnt_chan;
 
+atomic_bool adc_is_running = ATOMIC_VAR_INIT(false);
+
 static const voltage_scale_t voltage_scales[] = {
     {400.0, "200V, -200V"}, {120.0, "60V, -60V"}, {24.0, "12V, -12V"}, {6.0, "3V, -3V"}, {1.0, "500mV, -500mV"}};
 
@@ -204,11 +206,17 @@ void start_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
-    // Configurar el patrón de muestreo del ADC
+    // Check if ADC is already running
+    if (atomic_load(&adc_is_running)) {
+        ESP_LOGW(TAG, "ADC is already running, stopping it first");
+        stop_adc_sampling();
+    }
+
+    // Configure ADC pattern
     adc_digi_pattern_config_t adc_pattern = {
         .atten = ADC_ATTEN_DB_12, .channel = ADC_CHANNEL, .bit_width = ADC_BITWIDTH};
 
-    // Configuración del manejador de ADC continuo
+    // Configure continuous ADC
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
@@ -217,24 +225,33 @@ void start_adc_sampling(void)
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
 
-    // Configuración de ADC continuo
     adc_continuous_config_t continuous_config = {.pattern_num = 1,
                                                  .adc_pattern = &adc_pattern,
-                                                 .sample_freq_hz = SAMPLE_RATE_HZ,
+                                                 .sample_freq_hz = SAMPLE_RATE_HZ / adc_divider,
                                                  .conv_mode = ADC_CONV_SINGLE_UNIT_1,
                                                  .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
 
     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
 
-    ESP_LOGI(TAG, "ADC sampling started at frequency: %d Hz", SAMPLE_RATE_HZ);
+    // Set ADC as running
+    atomic_store(&adc_is_running, true);
+
+    ESP_LOGI(TAG, "ADC sampling started at frequency: %d Hz", SAMPLE_RATE_HZ / adc_divider);
 }
 
 void stop_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Stopping ADC sampling");
-    ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
-    ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+
+    // Only attempt to stop if ADC is running
+    if (atomic_load(&adc_is_running)) {
+        ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
+        ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+        atomic_store(&adc_is_running, false);
+    } else {
+        ESP_LOGW(TAG, "ADC was not running, nothing to stop");
+    }
 }
 
 void config_adc_sampling(void)
