@@ -8,7 +8,7 @@
 
 static const char *TAG = "ACQUISITION";
 
-// Definiciones de variables globales declaradas como externas en globals.h
+// Definitions of global variables declared as extern in globals.h
 adc_continuous_handle_t adc_handle;
 atomic_int adc_modify_freq = 0;
 atomic_int adc_divider = 1;
@@ -51,7 +51,7 @@ void spi_master_init(void)
     esp_err_t ret;
     int freq;
 
-    // Configurar el pin MISO como entrada con pull-down
+    // Configure the MISO pin as input with pull-down
     gpio_config_t io_conf = {.pin_bit_mask = (1ULL << PIN_NUM_MISO),
                              .mode = GPIO_MODE_INPUT,
                              .pull_up_en = GPIO_PULLUP_DISABLE,
@@ -59,9 +59,9 @@ void spi_master_init(void)
                              .intr_type = GPIO_INTR_DISABLE};
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    // Configurar el bus SPI
+    // Configure the SPI bus
     spi_bus_config_t buscfg = {.miso_io_num = PIN_NUM_MISO,
-                               .mosi_io_num = -1, // No se usa MOSI
+                               .mosi_io_num = -1, // MOSI not used
                                .sclk_io_num = PIN_NUM_CLK,
                                .quadwp_io_num = -1,
                                .quadhd_io_num = -1,
@@ -70,22 +70,22 @@ void spi_master_init(void)
                                    SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_MISO | SPICOMMON_BUSFLAG_IOMUX_PINS,
                                .intr_flags = ESP_INTR_FLAG_IRAM};
 
-    // Inicializar el bus SPI
+    // Initialize the SPI bus
     ret = spi_bus_initialize(HSPI_HOST, &buscfg, 3);
     ESP_ERROR_CHECK(ret);
 
-    // Configurar el dispositivo SPI
-    spi_device_interface_config_t devcfg = {.clock_speed_hz = spi_matrix[0][0], // Velocidad inicial del reloj SPI
-                                            .mode = 0, // Modo SPI 0
-                                            .spics_io_num = PIN_NUM_CS, // Pin CS
-                                            .queue_size = 7, // Tamaño de la cola de transacciones
-                                            .pre_cb = NULL, // No hay callback pre-transacción
-                                            .post_cb = NULL, // No hay callback post-transacción
+    // Configure the SPI device
+    spi_device_interface_config_t devcfg = {.clock_speed_hz = spi_matrix[0][0], // Initial SPI clock speed
+                                            .mode = 0, // SPI mode 0
+                                            .spics_io_num = PIN_NUM_CS, // CS pin
+                                            .queue_size = 7, // Transaction queue size
+                                            .pre_cb = NULL, // No pre-transaction callback
+                                            .post_cb = NULL, // No post-transaction callback
                                             .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
                                             .cs_ena_pretrans = spi_matrix[0][1],
                                             .input_delay_ns = spi_matrix[0][2]};
 
-    // Inicializar el dispositivo SPI
+    // Add the SPI device to the bus
     ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
     ESP_ERROR_CHECK(ret);
 
@@ -96,7 +96,7 @@ void spi_master_init(void)
 
 void init_mcpwm_trigger(void)
 {
-    // Configurar el pin de sincronización como entrada
+    // Configure the sync pin as input
     gpio_config_t io_conf = {.pin_bit_mask = (1ULL << SYNC_GPIO),
                              .mode = GPIO_MODE_INPUT,
                              .pull_up_en = GPIO_PULLUP_DISABLE,
@@ -104,7 +104,7 @@ void init_mcpwm_trigger(void)
                              .intr_type = GPIO_INTR_DISABLE};
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    // Configurar el timer MCPWM
+    // Configure the MCPWM timer
     mcpwm_timer_config_t timer_config = {
         .group_id = 0,
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
@@ -114,7 +114,7 @@ void init_mcpwm_trigger(void)
     };
     ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
 
-    // Configurar la fuente de sincronización GPIO
+    // Configure the GPIO sync source
     mcpwm_gpio_sync_src_config_t gpio_sync_config = {
         .group_id = 0,
         .gpio_num = SYNC_GPIO,
@@ -127,31 +127,31 @@ void init_mcpwm_trigger(void)
     mcpwm_sync_handle_t gpio_sync = NULL;
     ESP_ERROR_CHECK(mcpwm_new_gpio_sync_src(&gpio_sync_config, &gpio_sync));
 
-    // Configurar la fase de sincronización
+    // Configure the sync phase
     mcpwm_timer_sync_phase_config_t sync_phase = {
         .sync_src = gpio_sync, .count_value = 0, .direction = MCPWM_TIMER_DIRECTION_UP};
     ESP_ERROR_CHECK(mcpwm_timer_set_phase_on_sync(timer, &sync_phase));
 
-    // Configurar el operador MCPWM
+    // Configure the MCPWM operator
     mcpwm_operator_config_t operator_config = {
         .group_id = 0,
     };
     ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &oper));
     ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
 
-    // Configurar el comparador
+    // Configure the comparator
     mcpwm_comparator_config_t comparator_config = {
         .flags.update_cmp_on_tez = true,
     };
     ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &comparator));
 
-    // Configurar el generador
+    // Configure the generator
     mcpwm_generator_config_t generator_config = {
         .gen_gpio_num = MCPWM_GPIO,
     };
     ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
 
-    // Configurar las acciones del generador
+    // Configure generator actions
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
         generator,
         MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
@@ -159,7 +159,7 @@ void init_mcpwm_trigger(void)
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
         generator, MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_HIGH)));
 
-    // Configurar el valor de comparación
+    // Configure the compare value
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (uint32_t)(spi_matrix[0][4])));
     ESP_ERROR_CHECK(mcpwm_generator_set_force_level(generator, -1, true));
     ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
@@ -170,44 +170,42 @@ void init_mcpwm_trigger(void)
 
 esp_err_t init_pulse_counter(void)
 {
-    // Configuración básica del contador de pulsos
+    // Basic pulse counter configuration
     pcnt_unit_config_t unit_config = {
         .high_limit = PCNT_HIGH_LIMIT,
         .low_limit = PCNT_LOW_LIMIT,
     };
     ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
 
-    // Configuración del canal
+    // Channel configuration
     pcnt_chan_config_t chan_config = {
         .edge_gpio_num = SINGLE_INPUT_PIN,
-        .level_gpio_num = -1, // No usado
+        .level_gpio_num = -1, // Not used
     };
     ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_config, &pcnt_chan));
 
-    // Configurar el filtro de glitches
+    // Configure glitch filter
     pcnt_glitch_filter_config_t filter_config = {
         .max_glitch_ns = 1000,
     };
     ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
 
-    // Configurar para contar en flanco positivo inicialmente
+    // Configure to count on positive edge initially
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan,
-                                                 PCNT_CHANNEL_EDGE_ACTION_INCREASE, // Acción en flanco positivo
-                                                 PCNT_CHANNEL_EDGE_ACTION_HOLD // Acción en flanco negativo
+                                                 PCNT_CHANNEL_EDGE_ACTION_INCREASE, // Action on positive edge
+                                                 PCNT_CHANNEL_EDGE_ACTION_HOLD // Action on negative edge
                                                  ));
 
-    // Habilitar el contador
+    // Enable the counter
     ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
 
     ESP_LOGI(TAG, "Pulse counter initialized");
     return ESP_OK;
 }
-#else // Funcionalidad para ADC interno
+#else // Functionality for internal ADC
 
-// At the top of acquisition.c, add:
 atomic_bool adc_initializing = ATOMIC_VAR_INIT(false);
 
-// Modify start_adc_sampling() in acquisition.c:
 void start_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
@@ -275,7 +273,6 @@ void start_adc_sampling(void)
     ESP_LOGI(TAG, "ADC sampling started at frequency: %d Hz", SAMPLE_RATE_HZ / adc_divider);
 }
 
-// Modify stop_adc_sampling() in acquisition.c:
 void stop_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Stopping ADC sampling");
@@ -315,11 +312,11 @@ void config_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Reconfiguring ADC with new frequency: %d Hz", SAMPLE_RATE_HZ / adc_divider);
 
-    // Detener y desinicializar el ADC
+    // Stop and deinitialize the ADC
     stop_adc_sampling();
     ESP_LOGI(TAG, "Stopped ADC");
 
-    // Configuración del manejador de ADC continuo
+    // Configuration of the continuous ADC handle
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
@@ -328,11 +325,11 @@ void config_adc_sampling(void)
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
 
-    // Configurar el patrón de muestreo del ADC
+    // Configure the ADC sampling pattern
     adc_digi_pattern_config_t adc_pattern = {
         .atten = ADC_ATTEN_DB_12, .channel = ADC_CHANNEL, .bit_width = ADC_BITWIDTH};
 
-    // Configuración de ADC continuo con frecuencia ajustada
+    // Continuous ADC configuration with adjusted frequency
     adc_continuous_config_t continuous_config = {.pattern_num = 1,
                                                  .adc_pattern = &adc_pattern,
                                                  .sample_freq_hz = SAMPLE_RATE_HZ / adc_divider,
@@ -342,10 +339,10 @@ void config_adc_sampling(void)
     ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
     ESP_LOGI(TAG, "Configured ADC");
 
-    // Actualizar el tiempo de espera para la conversión
+    // Update the wait time for conversion
     wait_convertion_time = WAIT_ADC_CONV_TIME * adc_divider;
 
-    // Iniciar nuevamente el ADC
+    // Start the ADC again
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
     ESP_LOGI(TAG, "Started ADC");
 }
@@ -353,13 +350,13 @@ void config_adc_sampling(void)
 
 void configure_gpio(void)
 {
-    // Configuración del pin de entrada para detección de trigger
+    // Configuration of the input pin for trigger detection
     gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE, // Sin interrupciones
-        .mode = GPIO_MODE_INPUT, // Configurar como entrada
-        .pin_bit_mask = (1ULL << SINGLE_INPUT_PIN), // Seleccionar el pin
-        .pull_down_en = GPIO_PULLDOWN_ENABLE, // Habilitar pull-down
-        .pull_up_en = GPIO_PULLUP_DISABLE, // Deshabilitar pull-up
+        .intr_type = GPIO_INTR_DISABLE, // No interrupts
+        .mode = GPIO_MODE_INPUT, // Configure as input
+        .pin_bit_mask = (1ULL << SINGLE_INPUT_PIN), // Select the pin
+        .pull_down_en = GPIO_PULLDOWN_ENABLE, // Enable pull-down
+        .pull_up_en = GPIO_PULLUP_DISABLE, // Disable pull-up
     };
     gpio_config(&io_conf);
 
@@ -368,17 +365,17 @@ void configure_gpio(void)
 
 void my_timer_init(void)
 {
-    // Configuración del timer
+    // Timer configuration
     timer_config_t config = {
         .divider = TIMER_DIVIDER,
         .counter_dir = TIMER_COUNT_DOWN,
         .counter_en = TIMER_PAUSE,
-        .alarm_en = TIMER_ALARM_DIS, // Deshabilitar la alarma
+        .alarm_en = TIMER_ALARM_DIS, // Disable alarm
         .auto_reload = TIMER_AUTORELOAD_DIS,
     };
     timer_init(TIMER_GROUP_0, TIMER_0, &config);
 
-    // Calcular el tiempo de espera en microsegundos
+    // Calculate the wait time in microseconds
     double sampling_frequency = get_sampling_frequency();
     wait_time_us = (BUF_SIZE / sampling_frequency) * 1000000;
 
@@ -389,10 +386,10 @@ void my_timer_init(void)
 
 void timer_wait(void)
 {
-    // Iniciar el temporizador
+    // Start the timer
     timer_start(TIMER_GROUP_0, TIMER_0);
 
-    // Esperar hasta que el temporizador alcance el valor de alarma (0)
+    // Wait until the timer reaches the alarm value (0)
     uint64_t timer_val;
     while (1) {
         timer_get_counter_value(TIMER_GROUP_0, TIMER_0, &timer_val);
@@ -401,16 +398,16 @@ void timer_wait(void)
         }
     }
 
-    // Pausar el temporizador
+    // Pause the timer
     timer_pause(TIMER_GROUP_0, TIMER_0);
 
-    // Reiniciar el temporizador
+    // Reset the timer
     timer_set_counter_value(TIMER_GROUP_0, TIMER_0, wait_time_us);
 }
 
 void init_square_wave(void)
 {
-    // Configurar el timer LEDC
+    // Configure the LEDC timer
     ledc_timer_config_t timer_conf = {.speed_mode = LEDC_LOW_SPEED_MODE,
                                       .duty_resolution = LEDC_TIMER_10_BIT,
                                       .timer_num = SQUARE_WAVE_TIMER,
@@ -418,7 +415,7 @@ void init_square_wave(void)
                                       .clk_cfg = LEDC_AUTO_CLK};
     ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
 
-    // Configurar el canal LEDC para la onda cuadrada
+    // Configure the LEDC channel for the square wave
     ledc_channel_config_t channel_conf = {.gpio_num = SQUARE_WAVE_GPIO,
                                           .speed_mode = LEDC_LOW_SPEED_MODE,
                                           .channel = SQUARE_WAVE_CHANNEL,
@@ -432,7 +429,7 @@ void init_square_wave(void)
 
 void init_trigger_pwm(void)
 {
-    // Configurar el timer LEDC para el nivel de trigger
+    // Configure the LEDC timer for the trigger level
     ledc_timer_config_t ledc_timer = {
         .duty_resolution = TRIGGER_PWM_RES,
         .freq_hz = TRIGGER_PWM_FREQ,
@@ -442,7 +439,7 @@ void init_trigger_pwm(void)
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
-    // Configurar el canal LEDC para el nivel de trigger
+    // Configure the LEDC channel for the trigger level
     ledc_channel.channel = TRIGGER_PWM_CHANNEL;
     ledc_channel.duty = 0;
     ledc_channel.gpio_num = TRIGGER_PWM_GPIO;
@@ -453,7 +450,7 @@ void init_trigger_pwm(void)
 
     ESP_LOGI(TAG, "Trigger PWM initialized with frequency: %d Hz", TRIGGER_PWM_FREQ);
 
-    esp_err_t ret = set_trigger_level(0); // Inicializar el nivel de trigger en 0%
+    esp_err_t ret = set_trigger_level(0); // Initialize the trigger level to 0%
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set trigger level");
     }
@@ -461,11 +458,11 @@ void init_trigger_pwm(void)
 
 void init_sine_wave(void)
 {
-    // Configuración de la onda senoidal DAC
+    // Sine wave configuration using DAC
     dac_cosine_handle_t chan0_handle;
     dac_cosine_config_t cos0_cfg = {
         .chan_id = DAC_CHAN_1,
-        .freq_hz = 20000, // Frecuencia de la señal senoidal en Hz
+        .freq_hz = 20000, // Sine wave frequency in Hz
         .clk_src = DAC_COSINE_CLK_SRC_DEFAULT,
         .offset = 0,
         .phase = DAC_COSINE_PHASE_0,
@@ -476,13 +473,13 @@ void init_sine_wave(void)
     ESP_ERROR_CHECK(dac_cosine_new_channel(&cos0_cfg, &chan0_handle));
     ESP_ERROR_CHECK(dac_cosine_start(chan0_handle));
 
-    ESP_LOGI(TAG, "Sine wave generator initialized at 10 kHz");
+    ESP_LOGI(TAG, "Sine wave generator initialized at 20 kHz");
 }
 
 void dac_sine_wave_task(void *pvParameters)
 {
     init_sine_wave();
-    vTaskDelete(NULL); // Finalizar la tarea una vez que la señal está configurada
+    vTaskDelete(NULL); // End the task once the signal is configured
 }
 
 esp_err_t set_trigger_level(int percentage)
@@ -492,7 +489,7 @@ esp_err_t set_trigger_level(int percentage)
         return ESP_FAIL;
     }
 
-    // Convertir porcentaje a ciclo de trabajo (0-1023)
+    // Convert percentage to duty cycle (0-1023)
     uint32_t duty = (percentage * (1 << TRIGGER_PWM_RES)) / 100;
     ESP_LOGI(TAG, "Setting trigger level to %d%% (duty: %lu)", percentage, duty);
 
@@ -509,13 +506,13 @@ esp_err_t set_trigger_level(int percentage)
     return ESP_OK;
 }
 
-// Funciones de información de configuración
+// Configuration information functions
 double get_sampling_frequency(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 2500000; // Frecuencia de muestreo para ADC externo
+    return 2500000; // Sampling frequency for external ADC
 #else
-    return 496490; // Frecuencia de muestreo para ADC interno
+    return 496490; // Sampling frequency for internal ADC
 #endif
 }
 
@@ -530,33 +527,33 @@ int dividing_factor(void)
 
 int get_bits_per_packet(void)
 {
-    return 16; // Tamaño de paquete en bits
+    return 16; // Packet size in bits
 }
 
 int get_data_mask(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 0x1FF8; // Máscara para los bits de datos (ADC externo)
+    return 0x1FF8; // Mask for data bits (external ADC)
 #else
-    return 0x0FFF; // Máscara para los bits de datos (ADC interno)
+    return 0x0FFF; // Mask for data bits (internal ADC)
 #endif
 }
 
 int get_channel_mask(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 0x0; // Máscara para los bits de canal (ADC externo)
+    return 0x0; // Mask for channel bits (external ADC)
 #else
-    return 0xF000; // Máscara para los bits de canal (ADC interno)
+    return 0xF000; // Mask for channel bits (internal ADC)
 #endif
 }
 
 int get_useful_bits(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 10; // Resolución del ADC externo configurada
+    return 10; // Resolution of the configured external ADC
 #else
-    return ADC_BITWIDTH; // Resolución del ADC interno configurada
+    return ADC_BITWIDTH; // Resolution of the configured internal ADC
 #endif
 }
 
@@ -576,7 +573,7 @@ int get_discard_trailer(void)
 
 int get_samples_per_packet(void)
 {
-    int total_samples = BUF_SIZE; // Número de muestras por llamada a send
+    int total_samples = BUF_SIZE; // Number of samples per send call
     return total_samples - get_discard_head() - get_discard_trailer();
 }
 
@@ -591,7 +588,7 @@ int get_max_bits(void)
 
 int get_mid_bits(void)
 {
-    // get_mid_bits debe ser siempre mayor que la mitad de get_max_bits
+    // get_mid_bits must always be greater than half of get_max_bits
 #ifdef USE_EXTERNAL_ADC
     return 512;
 #else

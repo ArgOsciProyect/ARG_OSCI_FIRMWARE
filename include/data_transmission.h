@@ -87,6 +87,19 @@ esp_err_t set_continuous_mode(void);
 bool is_triggered(int current, int last);
 
 /**
+ * @brief Send data packet to connected client in a non-blocking manner
+ *
+ * Transmits a buffer of data to the currently connected client over TCP in a non-blocking way.
+ *
+ * @param client_sock Socket descriptor for the connected client
+ * @param buffer Data buffer to send
+ * @param len Length of the data to send
+ * @param flags Flags for the send operation
+ * @return ESP_OK on success, ESP_FAIL on error, ESP_ERR_TIMEOUT if a WiFi operation is requested
+ */
+esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags);
+
+/**
  * @brief Acquire data from the configured ADC
  *
  * Reads data from either the internal ADC (via adc_continuous_read) or

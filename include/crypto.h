@@ -33,8 +33,7 @@
  * @param input Encrypted data buffer
  * @param input_len Length of encrypted data
  * @param output Buffer to store decrypted result
- * @param output_len Pointer to size of output buffer (updated with actual
- * length)
+ * @param output_len Pointer to size of output buffer (updated with actual length)
  * @return 0 on success, mbedTLS error code on failure
  */
 int decrypt_with_private_key(unsigned char *input, size_t input_len, unsigned char *output, size_t *output_len);
@@ -91,5 +90,8 @@ unsigned char *get_private_key(void);
  * @return Handle to the semaphore used to signal key generation completion
  */
 SemaphoreHandle_t get_key_gen_semaphore(void);
+
+/* Crypto Configuration */
+#define KEYSIZE 3072
 
 #endif /* CRYPTO_H */

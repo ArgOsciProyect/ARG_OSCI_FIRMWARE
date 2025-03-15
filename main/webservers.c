@@ -12,7 +12,7 @@
 
 static const char *TAG = "WEBSERVER";
 
-// Definición de variables globales declaradas como externas en globals.h
+// Definition of global variables declared as extern in globals.h
 httpd_handle_t second_server = NULL;
 int new_sock = -1;
 
@@ -38,13 +38,13 @@ esp_err_t config_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(config, "max_bits", get_max_bits());
     cJSON_AddNumberToObject(config, "mid_bits", get_mid_bits());
 
-    // Crear el array de escalas de voltaje
+    // Create the voltage scales array
     cJSON *voltage_scales_array = cJSON_CreateArray();
     if (voltage_scales_array != NULL) {
         const voltage_scale_t *scales = get_voltage_scales();
         int count = get_voltage_scales_count();
 
-        // Añadir cada escala al array
+        // Add each scale to the array
         for (int i = 0; i < count; i++) {
             cJSON *scale = cJSON_CreateObject();
             if (scale != NULL) {
@@ -94,7 +94,7 @@ esp_err_t test_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Test handler called");
 
-    // Leer datos POST
+    // Read POST data
     char content[600];
     int received = httpd_req_recv(req, content, sizeof(content) - 1);
     if (received <= 0) {
@@ -104,7 +104,7 @@ esp_err_t test_handler(httpd_req_t *req)
     content[received] = '\0';
     ESP_LOGI(TAG, "Received content: %s", content);
 
-    // Analizar JSON
+    // Parse JSON
     cJSON *root = cJSON_Parse(content);
     if (!root) {
         ESP_LOGI(TAG, "Failed to parse JSON");
@@ -112,7 +112,7 @@ esp_err_t test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Obtener mensaje encriptado y copiarlo
+    // Get encrypted message and copy it
     cJSON *encrypted_msg = cJSON_GetObjectItem(root, "word");
     if (!encrypted_msg || !cJSON_IsString(encrypted_msg)) {
         ESP_LOGI(TAG, "Failed to get encrypted message");
@@ -121,7 +121,7 @@ esp_err_t test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Copiar el mensaje encriptado ya que liberaremos root
+    // Copy the encrypted message since we will free root
     char *encrypted_copy = strdup(encrypted_msg->valuestring);
     if (!encrypted_copy) {
         ESP_LOGI(TAG, "Failed to copy encrypted message");
@@ -130,10 +130,10 @@ esp_err_t test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Liberar root ya que no lo necesitamos más
+    // Free root since we no longer need it
     cJSON_Delete(root);
 
-    // Desencriptar mensaje
+    // Decrypt message
     char decrypted[256];
     if (decrypt_base64_message(encrypted_copy, decrypted, sizeof(decrypted)) != ESP_OK) {
         ESP_LOGI(TAG, "Failed to decrypt message");
@@ -142,10 +142,10 @@ esp_err_t test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Liberar copia encriptada ya que no la necesitamos más
+    // Free encrypted copy since we no longer need it
     free(encrypted_copy);
 
-    // Crear respuesta
+    // Create response
     cJSON *response = cJSON_CreateObject();
     if (!response) {
         ESP_LOGI(TAG, "Failed to create response object");
@@ -168,11 +168,11 @@ esp_err_t test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Enviar respuesta
+    // Send response
     httpd_resp_set_type(req, "application/json");
     esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
 
-    // Limpiar en orden inverso a la asignación
+    // Clean up in reverse order of allocation
     free((void *)json_response);
     cJSON_Delete(response);
 
@@ -194,7 +194,7 @@ esp_err_t trigger_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Obtener configuración de flanco
+    // Get edge configuration
     cJSON *edge = cJSON_GetObjectItem(root, "trigger_edge");
     if (cJSON_IsString(edge)) {
         if (strcmp(edge->valuestring, "positive") == 0) {
@@ -217,7 +217,7 @@ esp_err_t trigger_handler(httpd_req_t *req)
 #endif
     }
 
-    // Obtener porcentaje de trigger
+    // Get trigger percentage
     cJSON *trigger = cJSON_GetObjectItem(root, "trigger_percentage");
     if (!cJSON_IsNumber(trigger)) {
         cJSON_Delete(root);
@@ -236,7 +236,7 @@ esp_err_t trigger_handler(httpd_req_t *req)
             return httpd_resp_send_500(req);
         }
     }
-    // Enviar respuesta de éxito
+    // Send success response
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "set_percentage", percentage);
     cJSON_AddStringToObject(response, "edge", trigger_edge ? "positive" : "negative");
@@ -255,16 +255,16 @@ esp_err_t single_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Single handler called");
 
-    // Establecer tipo de contenido como JSON
+    // Set content type as JSON
     httpd_resp_set_type(req, "application/json");
 
-    // Cambiar a modo trigger único
+    // Switch to single trigger mode
     esp_err_t ret = set_single_trigger_mode();
     if (ret != ESP_OK) {
         return httpd_resp_send_500(req);
     }
 
-    // Respuesta JSON simple
+    // Simple JSON response
     const char *response = "{\"mode\":\"Single\"}";
     return httpd_resp_send(req, response, strlen(response));
 }
@@ -284,17 +284,17 @@ esp_err_t freq_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
-    // Obtener acción (more/less)
+    // Get action (more/less)
     cJSON *action = cJSON_GetObjectItem(root, "action");
     if (!cJSON_IsString(action)) {
         cJSON_Delete(root);
         return httpd_resp_send_500(req);
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Pausa para reducir posibles crashes
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Pause to reduce potential crashes
 
 #ifdef USE_EXTERNAL_ADC
-    // Determinar índice según acción
+    // Determine index based on action
     if (strcmp(action->valuestring, "less") == 0 && spi_index != 6) {
         spi_index++;
     }
@@ -302,10 +302,10 @@ esp_err_t freq_handler(httpd_req_t *req)
         spi_index--;
     }
 
-    ESP_LOGI(TAG, "Índice spi: %d", spi_index);
+    ESP_LOGI(TAG, "spi index: %d", spi_index);
 
     if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
-        // Reinicializar SPI con nueva frecuencia
+        // Reinitialize SPI with new frequency
         ESP_LOGI(TAG, "Reinitializing SPI with new frequency: %lu", spi_matrix[spi_index][0]);
         ESP_ERROR_CHECK(spi_bus_remove_device(spi));
 
@@ -321,10 +321,10 @@ esp_err_t freq_handler(httpd_req_t *req)
 
         ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &devcfg, &spi));
 
-        // Actualizar MCPWM
+        // Update MCPWM
         ESP_ERROR_CHECK(mcpwm_timer_set_period(timer, spi_matrix[spi_index][3]));
 
-        // Actualizar valor del comparador
+        // Update comparator value
         ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, spi_matrix[spi_index][4]));
 
         xSemaphoreGive(spi_mutex);
@@ -332,11 +332,11 @@ esp_err_t freq_handler(httpd_req_t *req)
 
     ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &final_freq));
 
-    // Construir respuesta
+    // Build response
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "sampling_frequency", final_freq * SPI_FREQ_SCALE_FACTOR);
 #else
-    // Ajustar divisor para ADC interno
+    // Adjust divider for internal ADC
     if (strcmp(action->valuestring, "less") == 0 && adc_divider != 16) {
         adc_divider *= 2;
     }
@@ -345,7 +345,7 @@ esp_err_t freq_handler(httpd_req_t *req)
     }
     adc_modify_freq = 1;
 
-    // Construir respuesta
+    // Build response
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "sampling_frequency", get_sampling_frequency() / adc_divider);
 #endif
@@ -354,7 +354,7 @@ esp_err_t freq_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     esp_err_t ret = httpd_resp_send(req, json_response, strlen(json_response));
 
-    // Limpieza
+    // Cleanup
     free((void *)json_response);
     cJSON_Delete(response);
     cJSON_Delete(root);
@@ -383,16 +383,16 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
     }
 #endif
 
-    // Obtener información IP adecuada según puerto de origen de la solicitud
+    // Get appropriate IP information based on request origin port
     esp_netif_ip_info_t ip_info;
     if (httpd_req_get_hdr_value_len(req, "Host") > 0) {
         char host[32];
         httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
-        // Verificar si la solicitud vino del servidor AP (puerto 81)
+        // Verify if the request came from the AP server (port 81)
         bool is_ap_server = (strstr(host, ":81") != NULL);
 
         if (is_ap_server) {
-            // Si es AP, usar info IP del AP
+            // If AP, use AP IP info
             if (get_ap_ip_info(&ip_info) != ESP_OK) {
 #ifndef USE_EXTERNAL_ADC
                 atomic_store(&wifi_operation_requested, 0); // Release lock before returning
@@ -401,7 +401,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
                 return ESP_FAIL;
             }
         } else {
-            // Si no es AP, usar info IP de STA
+            // If not AP, use STA IP info
             if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK ||
                 ip_info.ip.addr == 0) {
 #ifndef USE_EXTERNAL_ADC
@@ -412,7 +412,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
             }
         }
     } else {
-        // Usar modo AP por defecto si no se puede determinar la fuente
+        // Use AP mode by default if source cannot be determined
         if (get_ap_ip_info(&ip_info) != ESP_OK) {
 #ifndef USE_EXTERNAL_ADC
             atomic_store(&wifi_operation_requested, 0); // Release lock before returning
@@ -422,13 +422,13 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
         }
     }
 
-    // Cerrar socket existente si lo hay
+    // Close existing socket if there is one
     if (new_sock != -1) {
         safe_close(new_sock);
         new_sock = -1;
     }
 
-    // Crear y vincular nuevo socket
+    // Create and bind new socket
     if (create_socket_and_bind(&ip_info) != ESP_OK) {
 #ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
@@ -442,7 +442,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
     atomic_store(&wifi_operation_requested, 0);
 #endif
 
-    // Obtener información del socket
+    // Get socket information
     char ip_str[16];
     struct sockaddr_in new_addr;
     socklen_t new_addr_len = sizeof(new_addr);
@@ -457,7 +457,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
     inet_ntop(AF_INET, &new_addr.sin_addr, ip_str, sizeof(ip_str));
     int new_port = ntohs(new_addr.sin_port);
 
-    // Enviar respuesta
+    // Send response
     return send_internal_mode_response(req, ip_str, new_port);
 }
 
@@ -465,16 +465,16 @@ esp_err_t normal_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Normal handler called");
 
-    // Establecer tipo de contenido como JSON
+    // Set content type as JSON
     httpd_resp_set_type(req, "application/json");
 
-    // Cambiar a modo continuo
+    // Switch to continuous mode
     esp_err_t ret = set_continuous_mode();
     if (ret != ESP_OK) {
         return httpd_resp_send_500(req);
     }
 
-    // Respuesta JSON simple
+    // Simple JSON response
     const char *response = "{\"mode\":\"Normal\"}";
     return httpd_resp_send(req, response, strlen(response));
 }
@@ -505,7 +505,7 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config)
         return ESP_FAIL;
     }
 
-    // Desencriptar SSID
+    // Decrypt SSID
     char ssid_decrypted[512];
     if (decrypt_base64_message(ssid_encrypted->valuestring, ssid_decrypted, sizeof(ssid_decrypted)) != ESP_OK) {
         httpd_resp_send_500(req);
@@ -513,7 +513,7 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config)
         return ESP_FAIL;
     }
 
-    // Desencriptar Password
+    // Decrypt Password
     char password_decrypted[512];
     if (decrypt_base64_message(password_encrypted->valuestring, password_decrypted, sizeof(password_decrypted)) !=
         ESP_OK) {
@@ -641,7 +641,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Crear y vincular socket
+    // Create and bind socket
     if (new_sock != -1) {
         safe_close(new_sock);
         new_sock = -1;
@@ -689,7 +689,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     atomic_store(&wifi_operation_requested, 0);
 #endif
 
-    // Obtener detalles del socket
+    // Get socket details
     char ip_str[16];
     struct sockaddr_in bound_addr;
     socklen_t addr_len = sizeof(bound_addr);
@@ -710,12 +710,12 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
 
 esp_err_t get_public_key_handler(httpd_req_t *req)
 {
-    // Configurar encabezados CORS
+    // Configure CORS headers
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
 
-    // Si es una solicitud OPTIONS, responder OK
+    // If it's an OPTIONS request, respond OK
     if (req->method == HTTP_OPTIONS) {
         return httpd_resp_send(req, NULL, 0);
     }
@@ -793,7 +793,7 @@ httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.core_id = 0; // Ejecutar en núcleo 0
+    config.core_id = 0; // Run on core 0
     config.server_port = 81;
     config.ctrl_port = 32767;
     config.stack_size = 4096 * 4;
@@ -802,7 +802,7 @@ httpd_handle_t start_webserver(void)
     config.lru_purge_enable = true;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Registrar handlers para distintos endpoints
+        // Register handlers for different endpoints
         httpd_uri_t reset_socket_uri = {
             .uri = "/reset", .method = HTTP_GET, .handler = reset_socket_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &reset_socket_uri);
@@ -849,18 +849,18 @@ httpd_handle_t start_webserver(void)
 
 httpd_handle_t start_second_webserver(void)
 {
-    // Detener el servidor existente si ya está en ejecución
+    // Stop the existing server if it is already running
     if (second_server != NULL) {
         httpd_stop(second_server);
         second_server = NULL;
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.core_id = 0; // Ejecutar en núcleo 0
+    config.core_id = 0; // Run on core 0
     config.server_port = 80;
-    config.max_uri_handlers = 10; // Aumentar desde el valor predeterminado 8
-    config.max_resp_headers = 8; // Aumentar si es necesario
-    config.lru_purge_enable = true; // Habilitar mecanismo LRU
+    config.max_uri_handlers = 10; // Increase from default 8
+    config.max_resp_headers = 8; // Increase if needed
+    config.lru_purge_enable = true; // Enable LRU mechanism
     config.stack_size = 4096 * 1.5;
 
     if (httpd_start(&second_server, &config) == ESP_OK) {
