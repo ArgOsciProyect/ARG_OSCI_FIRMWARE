@@ -30,9 +30,10 @@ atomic_int current_state = ATOMIC_VAR_INIT(0);
  */
 atomic_int trigger_edge = ATOMIC_VAR_INIT(1);
 
-// Add at the top of data_transmission.c with other atomic variables
+#ifndef USE_EXTERNAL_ADC
 atomic_int wifi_operation_requested = ATOMIC_VAR_INIT(0);
 atomic_int wifi_operation_acknowledged = ATOMIC_VAR_INIT(0);
+#endif
 
 esp_err_t data_transmission_init(void)
 {
@@ -117,8 +118,10 @@ esp_err_t set_single_trigger_mode(void)
             pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
     }
 
-    // Get initial state
-    pcnt_unit_get_count(pcnt_unit, &last_state);
+    // Get initial state (corregir advertencia)
+    int temp_last_state;
+    pcnt_unit_get_count(pcnt_unit, &temp_last_state);
+    last_state = temp_last_state;
 #else
     // Sample the current GPIO state
     last_state = gpio_get_level(SINGLE_INPUT_PIN);
@@ -178,9 +181,10 @@ static size_t pending_send_size = 0;
 static size_t pending_send_offset = 0;
 static bool send_in_progress = false;
 
-// Non-blocking send function
 esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags)
 {
+    static int socket_at_start = -1; // Para rastrear cambios en new_sock durante el envío
+
     // If first send or previous send completed
     if (!send_in_progress) {
         // Store the buffer info for potential retries
@@ -188,6 +192,7 @@ esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags
         pending_send_size = len;
         pending_send_offset = 0;
         send_in_progress = true;
+        socket_at_start = new_sock; // Almacenar el valor actual de new_sock
 
         // Make socket non-blocking for this operation
         int sock_flags = fcntl(client_sock, F_GETFL, 0);
@@ -196,7 +201,8 @@ esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags
 
     // Try to send remaining data
     while (pending_send_offset < pending_send_size) {
-        // Check for WiFi operation requests
+#ifndef USE_EXTERNAL_ADC
+        // Solo comprueba wifi_operation_requested en modo ADC interno
         if (atomic_load(&wifi_operation_requested)) {
             // Reset socket to blocking mode before returning
             int sock_flags = fcntl(client_sock, F_GETFL, 0);
@@ -204,6 +210,17 @@ esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags
             send_in_progress = false;
             return ESP_ERR_TIMEOUT; // Signal caller to handle the WiFi operation
         }
+#else
+        // En modo ADC externo, verificar si el socket ha cambiado
+        if (new_sock != socket_at_start) {
+            ESP_LOGI(TAG, "Socket changed during send operation (was %d, now %d), aborting", socket_at_start, new_sock);
+            // Reset socket to blocking mode before returning
+            int sock_flags = fcntl(client_sock, F_GETFL, 0);
+            fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+            send_in_progress = false;
+            return ESP_FAIL; // Abortar envío si el socket cambió
+        }
+#endif
 
         ssize_t sent = send(client_sock, pending_send_buffer + pending_send_offset,
                             pending_send_size - pending_send_offset, flags);
@@ -241,6 +258,8 @@ void socket_task(void *pvParameters)
     socklen_t client_addr_len = sizeof(client_addr);
     char addr_str[128];
     uint32_t len;
+    int current_sock = -1; // Para rastrear cambios en new_sock
+    int client_sock = -1; // Declarar client_sock al inicio y establecerlo a -1
 
 #ifdef USE_EXTERNAL_ADC
     uint8_t buffer[BUF_SIZE];
@@ -251,6 +270,7 @@ void socket_task(void *pvParameters)
     t.rx_buffer = buffer;
     t.flags = 0;
     len = BUF_SIZE;
+    esp_err_t ret = ESP_OK; // Inicializar ret para evitar el error
 #else
     uint8_t buffer[BUF_SIZE];
 #endif
@@ -269,55 +289,96 @@ void socket_task(void *pvParameters)
 
     while (1) {
 #ifndef USE_EXTERNAL_ADC
-        // Check for WiFi operation request at the beginning of each loop
+        // Solo para ADC interno: verificación de operaciones WiFi
         if (atomic_load(&wifi_operation_requested)) {
             ESP_LOGI(TAG, "WiFi operation requested, pausing ADC operations");
 
-            // Safely stop ADC if it's running
             if (atomic_load(&adc_is_running)) {
                 stop_adc_sampling();
             }
 
-            // Acknowledge the request
             atomic_store(&wifi_operation_acknowledged, 1);
 
-            // Wait until the WiFi operation is complete
             while (atomic_load(&wifi_operation_requested)) {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
 
-            // Reset acknowledgment
             atomic_store(&wifi_operation_acknowledged, 0);
 
             ESP_LOGI(TAG, "Resuming ADC operations after WiFi change");
         }
 #endif
 
+        // Detectar si el socket ha cambiado
+        if (new_sock != current_sock) {
+            ESP_LOGI(TAG, "Detected socket change: previous=%d, new=%d", current_sock, new_sock);
+            current_sock = new_sock;
+            // Si estábamos conectados con un cliente, cerramos esa conexión
+            if (client_sock >= 0) {
+                safe_close(client_sock);
+                client_sock = -1;
+                ESP_LOGI(TAG, "Closed previous client connection due to socket change");
+            }
+        }
+
         if (new_sock == -1) {
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             continue;
         }
 
-        int client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_sock < 0) {
-            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
-            close(new_sock);
-            new_sock = -1;
-            continue;
-        } else {
-            inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
-            ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
+        // Hacer que el socket de escucha sea no bloqueante para poder verificar
+        // periódicamente si ha cambiado
+        int sock_flags = fcntl(new_sock, F_GETFL, 0);
+        fcntl(new_sock, F_SETFL, sock_flags | O_NONBLOCK);
+
+        ESP_LOGI(TAG, "Waiting for client connection on socket %d...", new_sock);
+
+        // Bucle de aceptación de conexiones con timeouts para poder detectar cambios
+        while (1) {
+            // Comprobar si el socket ha cambiado
+            if (new_sock != current_sock) {
+                ESP_LOGI(TAG, "Socket changed while waiting for connection: old=%d, new=%d", current_sock, new_sock);
+                break; // Salir del bucle de accept y manejar el nuevo socket
+            }
+
+            client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
+
+            if (client_sock >= 0) {
+                // Éxito, tenemos una conexión
+                inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
+                ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
+                break;
+            } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                // Error real en accept
+                ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
+                close(new_sock);
+                new_sock = -1;
+                current_sock = -1; // Resetear el tracking de socket
+                break;
+            }
+
+            // No hay conexión todavía, esperar un poco y seguir verificando
+            vTaskDelay(pdMS_TO_TICKS(200));
         }
 
+        // Si el socket cambió o hubo un error, volver al principio del bucle principal
+        if (new_sock != current_sock || client_sock < 0) {
+            continue;
+        }
+
+        // Volver a modo bloqueante para el socket de escucha
+        sock_flags = fcntl(new_sock, F_GETFL, 0);
+        fcntl(new_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+
 #ifdef USE_EXTERNAL_ADC
-        esp_err_t ret;
+        // No necesitamos declarar ret aquí ya que ya está declarada e inicializada arriba
 #else
         start_adc_sampling();
 #endif
 
         while (1) {
 #ifndef USE_EXTERNAL_ADC
-            // Check for WiFi operation request inside the inner loop as well
+            // Solo para ADC interno: verificación de operaciones WiFi
             if (atomic_load(&wifi_operation_requested)) {
                 break; // Break the inner loop to handle this at the outer loop level
             }
@@ -326,8 +387,13 @@ void socket_task(void *pvParameters)
                 config_adc_sampling();
                 adc_modify_freq = 0;
             }
+#else
+            // En modo ADC externo, verificar si el socket ha cambiado
+            if (new_sock != current_sock) {
+                ESP_LOGI(TAG, "Socket changed during data transfer, stopping current transfer");
+                break; // Salir del bucle interno y volver a accept()
+            }
 #endif
-
             if (mode == 1) {
 #ifdef USE_EXTERNAL_ADC
                 if (xSemaphoreTake(spi_mutex, portMAX_DELAY) == pdTRUE) {
@@ -338,20 +404,21 @@ void socket_task(void *pvParameters)
                     xSemaphoreGive(spi_mutex);
                 }
 
-                pcnt_unit_get_count(pcnt_unit, &current_state);
+                // Usar variable temporal para resolver advertencia de compilación
+                int temp_current_state;
+                pcnt_unit_get_count(pcnt_unit, &temp_current_state);
+                current_state = temp_current_state;
+
                 if (last_state == current_state) {
                     continue;
                 }
                 last_state = current_state;
+
                 if (ret == ESP_OK && len > 0) {
-                    // Prepare data for sending
-                    ssize_t sent = send(client_sock, send_buffer, send_len, flags);
-                    if (sent < 0) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            vTaskDelay(pdMS_TO_TICKS(10));
-                            continue;
-                        }
-                        ESP_LOGE(TAG, "Send error: errno %d", errno);
+                    // Usar send pseudo-no-bloqueante
+                    esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
+                    if (send_result != ESP_OK) {
+                        ESP_LOGE(TAG, "Send error");
                         break;
                     }
                 } else {
@@ -412,14 +479,10 @@ void socket_task(void *pvParameters)
             }
 
             if (ret == ESP_OK && len > 0) {
-                // Prepare data for sending
-                ssize_t sent = send(client_sock, send_buffer, send_len, flags);
-                if (sent < 0) {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        vTaskDelay(pdMS_TO_TICKS(10));
-                        continue;
-                    }
-                    ESP_LOGE(TAG, "Send error: errno %d", errno);
+                // Usar send pseudo-no-bloqueante
+                esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
+                if (send_result != ESP_OK) {
+                    ESP_LOGE(TAG, "Send error");
                     break;
                 }
             } else {
@@ -459,6 +522,7 @@ void socket_task(void *pvParameters)
 #endif
 
         safe_close(client_sock);
+        client_sock = -1;
         ESP_LOGI(TAG, "Client disconnected");
     }
 }

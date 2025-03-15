@@ -26,12 +26,13 @@
     "crypto.h": "c",
     "network.h": "c",
     "errno.h": "c",
-    "freertos.h": "c"
+    "freertos.h": "c",
+    "atomic": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
   "idf.adapterTargetName": "esp32",
-  "idf.espIdfPath": "/home/joaquin/esp/esp-idf",
-  "idf.toolsPath": "/home/joaquin/.espressif",
+  "idf.espIdfPath": "${env:HOME}/esp/esp-idf",
+  "idf.toolsPath": "${env:HOME}/.espressif",
   "idf.portWin": "COM3"
 }

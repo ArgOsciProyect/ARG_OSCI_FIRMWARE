@@ -260,7 +260,7 @@ void configure_led_gpio(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    
+
     // Initialize at low level (0)
     ESP_ERROR_CHECK(gpio_set_level(LED_GPIO, 0));
 }

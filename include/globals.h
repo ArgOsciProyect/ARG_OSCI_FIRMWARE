@@ -22,7 +22,7 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_continuous.h"
 
-// #define USE_EXTERNAL_ADC // Comment to use internal ADC
+#define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"
@@ -87,7 +87,7 @@
 #ifdef USE_EXTERNAL_ADC
 #define BUF_SIZE 17280 * 4
 #else
-#define BUF_SIZE 17280 * 3
+#define BUF_SIZE 1440*30
 #endif
 
 /* Heap Tracing */
@@ -122,12 +122,12 @@ extern unsigned char public_key[KEYSIZE];
 extern unsigned char private_key[KEYSIZE];
 extern SemaphoreHandle_t key_gen_semaphore;
 extern uint64_t wait_time_us;
+
+#ifndef USE_EXTERNAL_ADC
+extern SemaphoreHandle_t spi_mutex;
 extern atomic_int wifi_operation_requested;
 extern atomic_int wifi_operation_acknowledged;
 extern atomic_bool adc_is_running;
-
-#ifdef USE_EXTERNAL_ADC
-extern SemaphoreHandle_t spi_mutex;
 #endif
 
 /* Define SPI matrix content */

@@ -26,7 +26,9 @@ uint64_t wait_time_us;
 pcnt_unit_handle_t pcnt_unit;
 pcnt_channel_handle_t pcnt_chan;
 
+#ifndef USE_EXTERNAL_ADC
 atomic_bool adc_is_running = ATOMIC_VAR_INIT(false);
+#endif
 
 static const voltage_scale_t voltage_scales[] = {
     {400.0, "200V, -200V"}, {120.0, "60V, -60V"}, {24.0, "12V, -12V"}, {6.0, "3V, -3V"}, {1.0, "500mV, -500mV"}};
@@ -202,15 +204,29 @@ esp_err_t init_pulse_counter(void)
 }
 #else // Funcionalidad para ADC interno
 
+// At the top of acquisition.c, add:
+atomic_bool adc_initializing = ATOMIC_VAR_INIT(false);
+
+// Modify start_adc_sampling() in acquisition.c:
 void start_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
+    // If already initializing, don't try again
+    if (atomic_exchange(&adc_initializing, true)) {
+        ESP_LOGW(TAG, "ADC initialization already in progress");
+        return;
+    }
+
     // Check if ADC is already running
     if (atomic_load(&adc_is_running)) {
-        ESP_LOGW(TAG, "ADC is already running, stopping it first");
-        stop_adc_sampling();
+        ESP_LOGW(TAG, "ADC is already running, skipping initialization");
+        atomic_store(&adc_initializing, false);
+        return;
     }
+
+    // Add a small delay to ensure system resources are properly released
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // Configure ADC pattern
     adc_digi_pattern_config_t adc_pattern = {
@@ -223,7 +239,12 @@ void start_adc_sampling(void)
         .flags.flush_pool = false,
     };
 
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+    esp_err_t ret = adc_continuous_new_handle(&adc_config, &adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create ADC handle: %s", esp_err_to_name(ret));
+        atomic_store(&adc_initializing, false);
+        return;
+    }
 
     adc_continuous_config_t continuous_config = {.pattern_num = 1,
                                                  .adc_pattern = &adc_pattern,
@@ -231,23 +252,59 @@ void start_adc_sampling(void)
                                                  .conv_mode = ADC_CONV_SINGLE_UNIT_1,
                                                  .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
 
-    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
-    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    ret = adc_continuous_config(adc_handle, &continuous_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure ADC: %s", esp_err_to_name(ret));
+        adc_continuous_deinit(adc_handle);
+        atomic_store(&adc_initializing, false);
+        return;
+    }
+
+    ret = adc_continuous_start(adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start ADC: %s", esp_err_to_name(ret));
+        adc_continuous_deinit(adc_handle);
+        atomic_store(&adc_initializing, false);
+        return;
+    }
 
     // Set ADC as running
     atomic_store(&adc_is_running, true);
+    atomic_store(&adc_initializing, false);
 
     ESP_LOGI(TAG, "ADC sampling started at frequency: %d Hz", SAMPLE_RATE_HZ / adc_divider);
 }
 
+// Modify stop_adc_sampling() in acquisition.c:
 void stop_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Stopping ADC sampling");
 
+    // If we're in the middle of initialization, don't try to stop
+    if (atomic_load(&adc_initializing)) {
+        ESP_LOGW(TAG, "ADC is currently initializing, can't stop now");
+        return;
+    }
+
     // Only attempt to stop if ADC is running
     if (atomic_load(&adc_is_running)) {
-        ESP_ERROR_CHECK(adc_continuous_stop(adc_handle));
-        ESP_ERROR_CHECK(adc_continuous_deinit(adc_handle));
+        esp_err_t ret;
+
+        // First stop
+        ret = adc_continuous_stop(adc_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to stop ADC: %s", esp_err_to_name(ret));
+        }
+
+        // Add a delay before deinitializing
+        vTaskDelay(pdMS_TO_TICKS(20));
+
+        // Then deinitialize
+        ret = adc_continuous_deinit(adc_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to deinitialize ADC: %s", esp_err_to_name(ret));
+        }
+
         atomic_store(&adc_is_running, false);
     } else {
         ESP_LOGW(TAG, "ADC was not running, nothing to stop");

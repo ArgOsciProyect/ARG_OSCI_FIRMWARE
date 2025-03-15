@@ -366,6 +366,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Reset socket handler called");
 
+#ifndef USE_EXTERNAL_ADC
     // Request socket task to pause ADC operations
     atomic_store(&wifi_operation_requested, 1);
 
@@ -380,6 +381,7 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#endif
 
     // Obtener información IP adecuada según puerto de origen de la solicitud
     esp_netif_ip_info_t ip_info;
@@ -392,7 +394,9 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
         if (is_ap_server) {
             // Si es AP, usar info IP del AP
             if (get_ap_ip_info(&ip_info) != ESP_OK) {
+#ifndef USE_EXTERNAL_ADC
                 atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
                 httpd_resp_send_500(req);
                 return ESP_FAIL;
             }
@@ -400,7 +404,9 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
             // Si no es AP, usar info IP de STA
             if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) != ESP_OK ||
                 ip_info.ip.addr == 0) {
+#ifndef USE_EXTERNAL_ADC
                 atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
                 httpd_resp_send_500(req);
                 return ESP_FAIL;
             }
@@ -408,7 +414,9 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
     } else {
         // Usar modo AP por defecto si no se puede determinar la fuente
         if (get_ap_ip_info(&ip_info) != ESP_OK) {
+#ifndef USE_EXTERNAL_ADC
             atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
@@ -422,13 +430,17 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
 
     // Crear y vincular nuevo socket
     if (create_socket_and_bind(&ip_info) != ESP_OK) {
+#ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
+#ifndef USE_EXTERNAL_ADC
     // Allow socket task to resume
     atomic_store(&wifi_operation_requested, 0);
+#endif
 
     // Obtener información del socket
     char ip_str[16];
@@ -527,6 +539,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
         return send_wifi_response(req, "", 0, false);
     }
 
+#ifndef USE_EXTERNAL_ADC
     // Request socket task to pause ADC operations
     atomic_store(&wifi_operation_requested, 1);
 
@@ -541,14 +554,17 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#endif
 
     // Now it's safe to modify WiFi configuration
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     esp_err_t err = esp_wifi_connect();
 
+#ifndef USE_EXTERNAL_ADC
     // Allow socket task to resume
     atomic_store(&wifi_operation_requested, 0);
+#endif
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi: %s", esp_err_to_name(err));
@@ -598,6 +614,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
 esp_err_t internal_mode_handler(httpd_req_t *req)
 {
+#ifndef USE_EXTERNAL_ADC
     // Request socket task to pause ADC operations
     atomic_store(&wifi_operation_requested, 1);
 
@@ -612,11 +629,14 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#endif
 
     // Now it's safe to modify WiFi configuration
     esp_netif_ip_info_t ip_info;
     if (get_ap_ip_info(&ip_info) != ESP_OK) {
+#ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -630,7 +650,9 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     new_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (new_sock < 0) {
         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+#ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -644,7 +666,9 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         safe_close(new_sock);
         new_sock = -1;
+#ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -653,13 +677,17 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         ESP_LOGE(TAG, "Error during listen: errno %d", errno);
         safe_close(new_sock);
         new_sock = -1;
+#ifndef USE_EXTERNAL_ADC
         atomic_store(&wifi_operation_requested, 0); // Release lock before returning
+#endif
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
+#ifndef USE_EXTERNAL_ADC
     // Allow socket task to resume
     atomic_store(&wifi_operation_requested, 0);
+#endif
 
     // Obtener detalles del socket
     char ip_str[16];
