@@ -1,0 +1,56 @@
+sequenceDiagram
+    participant Client as Client
+    participant DataTrans as data_transmission.c
+    participant Acquisition as acquisition.c
+    
+    Client->>DataTrans: Connect to data socket
+    activate DataTrans
+    
+    DataTrans->>Acquisition: start_adc_sampling()
+    activate Acquisition
+    Acquisition->>Acquisition: Create ADC continuous handle
+    Acquisition->>Acquisition: Configure ADC pattern
+    Acquisition->>Acquisition: adc_continuous_start()
+    Acquisition->>Acquisition: atomic_store(&adc_is_running, true)
+    Acquisition-->>DataTrans: ADC started
+    deactivate Acquisition
+    
+    alt mode == 0 (Continuous)
+        loop Until client disconnects
+            DataTrans->>DataTrans: vTaskDelay(wait_convertion_time)
+            DataTrans->>Acquisition: adc_continuous_read()
+            Acquisition-->>DataTrans: Data buffer
+            DataTrans->>Client: non_blocking_send() buffer
+            
+            opt Frequency change requested
+                DataTrans->>Acquisition: config_adc_sampling()
+                Acquisition->>Acquisition: stop_adc_sampling()
+                Acquisition->>Acquisition: Create new handle with updated frequency
+                Acquisition->>Acquisition: adc_continuous_start()
+            end
+            
+            opt WiFi operation requested
+                DataTrans->>Acquisition: stop_adc_sampling()
+                DataTrans->>DataTrans: wifi_operation_acknowledged = 1
+                DataTrans->>DataTrans: Wait for operation completion
+                DataTrans->>DataTrans: wifi_operation_acknowledged = 0
+                DataTrans->>Acquisition: start_adc_sampling()
+            end
+        end
+    else mode == 1 (Single trigger)
+        loop Until client disconnects
+            DataTrans->>DataTrans: current_state = gpio_get_level(PIN)
+            
+            alt Edge detected (based on trigger_edge)
+                DataTrans->>DataTrans: Calculate precise timing
+                DataTrans->>Acquisition: adc_continuous_read()
+                Acquisition-->>DataTrans: Data buffer
+                DataTrans->>Client: non_blocking_send() buffer
+            end
+        end
+    end
+    
+    Client->>DataTrans: Disconnect
+    DataTrans->>Acquisition: stop_adc_sampling()
+    DataTrans->>DataTrans: safe_close(client_sock)
+    deactivate DataTrans

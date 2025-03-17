@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant Client as Client
+    participant WebServers as webservers.c
+    participant Crypto as crypto.c
+    participant Network as network.c
+    participant DataTrans as data_transmission.c
+    
+    Client->>WebServers: POST /connect_wifi (encrypted credentials)
+    WebServers->>Crypto: decrypt_base64_message() for SSID
+    Crypto-->>WebServers: Decrypted SSID
+    WebServers->>Crypto: decrypt_base64_message() for password
+    Crypto-->>WebServers: Decrypted password
+    
+    alt Using Internal ADC
+        WebServers->>DataTrans: wifi_operation_requested = 1
+        DataTrans->>DataTrans: Pause ADC operations
+        DataTrans-->>WebServers: wifi_operation_acknowledged = 1
+    end
+    
+    WebServers->>Network: esp_wifi_set_config() with credentials
+    WebServers->>Network: esp_wifi_connect()
+    WebServers->>Network: wait_for_ip()
+    Network-->>WebServers: IP obtained
+    
+    WebServers->>Network: safe_close() existing socket
+    WebServers->>Network: create_socket_and_bind()
+    
+    WebServers->>WebServers: start_second_webserver() on port 80
+    
+    alt Using Internal ADC
+        WebServers->>DataTrans: wifi_operation_requested = 0
+    end
+    
+    WebServers-->>Client: JSON with status, IP and port

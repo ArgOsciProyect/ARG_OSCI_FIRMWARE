@@ -1,0 +1,54 @@
+sequenceDiagram
+    participant Client as Client
+    participant WebServers as webservers.c
+    participant DataTrans as data_transmission.c
+    participant Acquisition as acquisition.c
+    
+    %% Trigger Configuration Section
+    Client->>WebServers: POST /trigger {trigger_edge, trigger_percentage}
+    WebServers->>WebServers: Parse JSON request
+    WebServers->>DataTrans: Update trigger_edge (1=positive, 0=negative)
+    
+    alt External ADC & Single Mode
+        WebServers->>Acquisition: Configure PCNT edge action
+        alt trigger_edge == 1 (positive)
+            Acquisition->>Acquisition: PCNT_CHANNEL_EDGE_ACTION_INCREASE on positive
+        else trigger_edge == 0 (negative)
+            Acquisition->>Acquisition: PCNT_CHANNEL_EDGE_ACTION_INCREASE on negative
+        end
+    end
+    
+    WebServers->>Acquisition: set_trigger_level(percentage)
+    Acquisition->>Acquisition: Convert to PWM duty cycle
+    Acquisition->>Acquisition: ledc_set_duty() & ledc_update_duty()
+    
+    WebServers-->>Client: Trigger configuration response
+    
+    %% Acquisition Mode Selection Section
+    alt Single-shot Mode
+        Client->>WebServers: GET /single
+        WebServers->>DataTrans: set_single_trigger_mode()
+        DataTrans->>DataTrans: mode = 1
+        
+        alt External ADC
+            DataTrans->>Acquisition: pcnt_unit_start()
+            DataTrans->>Acquisition: Configure PCNT edge action based on trigger_edge
+            DataTrans->>Acquisition: Get initial count state
+        else Internal ADC
+            DataTrans->>DataTrans: Sample GPIO state
+            DataTrans->>DataTrans: last_state = gpio_get_level(SINGLE_INPUT_PIN)
+        end
+        
+        WebServers-->>Client: {"mode":"Single"}
+    else Continuous Mode
+        Client->>WebServers: GET /normal
+        WebServers->>DataTrans: set_continuous_mode()
+        DataTrans->>DataTrans: mode = 0
+        DataTrans->>Acquisition: set_trigger_level(0) // Reset trigger level
+        
+        alt External ADC
+            DataTrans->>Acquisition: pcnt_unit_stop()
+        end
+        
+        WebServers-->>Client: {"mode":"Normal"}
+    end

@@ -1,0 +1,42 @@
+sequenceDiagram
+    participant Client as Client
+    participant DataTrans as data_transmission.c
+    participant Acquisition as acquisition.c
+    
+    Client->>DataTrans: Connect to data socket
+    activate DataTrans
+    
+    Note over DataTrans,Acquisition: External ADC already initialized during startup
+    
+    alt mode == 0 (Continuous)
+        loop Until client disconnects
+            DataTrans->>Acquisition: Take spi_mutex
+            DataTrans->>Acquisition: spi_device_polling_transmit()
+            Acquisition-->>DataTrans: SPI transaction complete
+            DataTrans->>Acquisition: Release spi_mutex
+            
+            DataTrans->>Client: non_blocking_send() buffer
+            
+            opt Socket change detected
+                DataTrans->>DataTrans: Break acquisition loop
+            end
+        end
+    else mode == 1 (Single trigger)
+        loop Until client disconnects
+            DataTrans->>Acquisition: Take spi_mutex
+            DataTrans->>Acquisition: spi_device_polling_transmit()
+            Acquisition-->>DataTrans: SPI transaction complete
+            DataTrans->>Acquisition: Release spi_mutex
+            
+            DataTrans->>Acquisition: pcnt_unit_get_count()
+            Acquisition-->>DataTrans: Current counter state
+            
+            alt Edge detected (counter changed)
+                DataTrans->>Client: non_blocking_send() buffer
+            end
+        end
+    end
+    
+    Client->>DataTrans: Disconnect
+    DataTrans->>DataTrans: safe_close(client_sock)
+    deactivate DataTrans

@@ -1,0 +1,376 @@
+sequenceDiagram
+    participant Main as main.c
+    participant Acquisition as acquisition.c
+    participant Network as network.c
+    participant WebServers as webservers.c
+    participant Crypto as crypto.c
+    participant DataTrans as data_transmission.c
+    participant Client as Client Application
+
+    %% System Initialization Phase
+    Main->>Main: app_main()
+    Main->>Main: Initialize NVS
+    Main->>Main: Initialize network stack
+    Main->>Main: Deinitialize task watchdog
+    
+    %% Crypto Initialization
+    Main->>Crypto: init_crypto()
+    Crypto->>Crypto: Create key_gen_semaphore
+    Crypto-->>Main: Return ESP_OK
+    Main->>Crypto: Create generate_key_pair_task (stack: 8192)
+    activate Crypto
+    Crypto->>Crypto: generate_key_pair_task()
+    Crypto->>Crypto: Initialize mbedTLS contexts
+    Crypto->>Crypto: Seed random number generator
+    Crypto->>Crypto: Setup PK context for RSA
+    Crypto->>Crypto: Generate RSA key pair (3072 bits)
+    Crypto->>Crypto: Write public_key in PEM format
+    Crypto->>Crypto: Write private_key in PEM format
+    Crypto->>Crypto: Free mbedTLS resources
+    Crypto->>Main: Signal completion (xSemaphoreGive)
+    deactivate Crypto
+    
+    Main->>Main: xSemaphoreTake(key_gen_semaphore, portMAX_DELAY)
+    Main->>Main: Configure watchdog (timeout: 1000s)
+    
+    %% Signal Generator Initialization
+    Main->>Acquisition: Create dac_sine_wave_task
+    activate Acquisition
+    Acquisition->>Acquisition: dac_sine_wave_task()
+    Acquisition->>Acquisition: init_sine_wave() (20kHz)
+    Acquisition->>Acquisition: dac_cosine_new_channel() & dac_cosine_start()
+    Acquisition-->>Main: Task completes (vTaskDelete)
+    deactivate Acquisition
+    
+    Main->>Acquisition: init_trigger_pwm()
+    Acquisition->>Acquisition: Configure LEDC timer (78125Hz, 10-bit)
+    Acquisition->>Acquisition: Configure PWM channel
+    Acquisition->>Acquisition: set_trigger_level(0)
+    Acquisition-->>Main: PWM initialized
+    
+    Main->>Acquisition: init_square_wave()
+    Acquisition->>Acquisition: Configure LEDC timer (1kHz)
+    Acquisition->>Acquisition: Configure channel (50% duty cycle)
+    Acquisition-->>Main: Square wave initialized
+    
+    %% Conditional ADC/SPI Initialization
+    alt External ADC (USE_EXTERNAL_ADC defined)
+        Main->>Main: Create SPI mutex
+        Main->>Acquisition: spi_master_init()
+        Acquisition->>Acquisition: Configure MISO pin with pull-down
+        Acquisition->>Acquisition: Initialize SPI bus (HSPI_HOST)
+        Acquisition->>Acquisition: Add SPI device with timing from spi_matrix[0]
+        Acquisition-->>Main: SPI Master initialized
+        
+        Main->>Acquisition: init_mcpwm_trigger()
+        Acquisition->>Acquisition: Configure sync GPIO pin
+        Acquisition->>Acquisition: Configure MCPWM timer (2.5MHz * 32)
+        Acquisition->>Acquisition: Configure GPIO sync source
+        Acquisition->>Acquisition: Configure sync phase
+        Acquisition->>Acquisition: Setup MCPWM operator, comparator, generator
+        Acquisition->>Acquisition: Set generator actions and compare value
+        Acquisition->>Acquisition: Enable and start timer
+        Acquisition-->>Main: MCPWM trigger initialized
+        
+        Main->>Acquisition: init_pulse_counter()
+        Acquisition->>Acquisition: Configure PCNT unit with limits
+        Acquisition->>Acquisition: Configure channel with edge trigger pin
+        Acquisition->>Acquisition: Set glitch filter (1000ns)
+        Acquisition->>Acquisition: Configure edge actions
+        Acquisition->>Acquisition: Enable counter unit
+        Acquisition-->>Main: Pulse counter initialized
+    else Internal ADC (USE_EXTERNAL_ADC not defined)
+        Note over Main,Acquisition: Internal ADC initialization deferred to socket_task
+    end
+    
+    Main->>Acquisition: my_timer_init()
+    Acquisition->>Acquisition: Configure timer (TIMER_GROUP_0, TIMER_0)
+    Acquisition->>Acquisition: Calculate wait_time_us based on sampling frequency
+    Acquisition->>Acquisition: Set counter value
+    Acquisition-->>Main: Hardware timer initialized
+    
+    Main->>Acquisition: configure_gpio()
+    Acquisition->>Acquisition: Configure SINGLE_INPUT_PIN as input with pull-down
+    Acquisition-->>Main: GPIO configured
+    
+    Main->>Network: configure_led_gpio()
+    Network->>Network: Configure LED_GPIO as output
+    Network->>Network: Set LED to OFF state (0)
+    Network-->>Main: LED GPIO configured
+    
+    %% Network Initialization
+    Main->>Network: wifi_init()
+    activate Network
+    Network->>Network: Get/create AP netif
+    Network->>Network: Get/create STA netif
+    Network->>Network: Initialize WiFi with default config
+    Network->>Network: Configure AP (SSID, password, auth mode)
+    Network->>Network: Set WiFi mode to WIFI_MODE_APSTA
+    Network->>Network: Apply config and start WiFi
+    Network-->>Main: WiFi initialized in AP+STA mode
+    deactivate Network
+    
+    %% Web Server Initialization
+    Main->>WebServers: start_webserver()
+    activate WebServers
+    WebServers->>WebServers: Configure HTTP server (port 81, core 0)
+    WebServers->>WebServers: Register all HTTP handlers (/reset, /trigger, etc.)
+    WebServers-->>Main: Server started on port 81
+    deactivate WebServers
+    
+    Main->>DataTrans: data_transmission_init()
+    DataTrans->>DataTrans: Reset read_miss_count
+    DataTrans-->>Main: ESP_OK
+    
+    %% Socket Task Creation
+    alt External ADC (USE_EXTERNAL_ADC defined)
+        Main->>DataTrans: Create socket_task on core 1 (stack: 72000)
+    else Internal ADC (USE_EXTERNAL_ADC not defined)
+        Main->>DataTrans: Create socket_task on core 1 (stack: 55000)
+    end
+    
+    Main->>Network: gpio_set_level(LED_GPIO, 1) - Indicate ready
+    Main->>Main: ESP32 Oscilloscope initialization complete
+    
+    %% Socket Task Startup
+    activate DataTrans
+    DataTrans->>DataTrans: socket_task() initializes
+    
+    %% Client Connection Phase
+    Client->>WebServers: HTTP request to /get_public_key
+    WebServers->>WebServers: Add CORS headers
+    WebServers->>Crypto: get_public_key()
+    Crypto-->>WebServers: Return public key (PEM format)
+    WebServers-->>Client: Return public key JSON
+    
+    alt Connect to External WiFi
+        Client->>WebServers: POST /connect_wifi (encrypted credentials)
+        WebServers->>WebServers: parse_wifi_credentials()
+        WebServers->>Crypto: decrypt_base64_message() for SSID
+        Crypto-->>WebServers: Decrypted SSID
+        WebServers->>Crypto: decrypt_base64_message() for password
+        Crypto-->>WebServers: Decrypted password
+        
+        alt Internal ADC (USE_EXTERNAL_ADC not defined)
+            WebServers->>DataTrans: Request pause (wifi_operation_requested = 1)
+            DataTrans->>DataTrans: Check wifi_operation_requested flag
+            DataTrans->>Acquisition: stop_adc_sampling()
+            Acquisition->>Acquisition: adc_continuous_stop()
+            Acquisition->>Acquisition: Delay 20ms
+            Acquisition->>Acquisition: adc_continuous_deinit()
+            Acquisition->>Acquisition: atomic_store(&adc_is_running, false)
+            DataTrans->>DataTrans: Acknowledge (wifi_operation_acknowledged = 1)
+        end
+        
+        WebServers->>Network: esp_wifi_set_mode(WIFI_MODE_APSTA)
+        WebServers->>Network: esp_wifi_set_config() with credentials
+        WebServers->>Network: esp_wifi_connect()
+        WebServers->>Network: wait_for_ip()
+        Network->>Network: Poll for IP (10 attempts, 1 second each)
+        Network-->>WebServers: IP obtained
+        
+        WebServers->>Network: safe_close() existing socket
+        WebServers->>WebServers: Stop second_server if running
+        WebServers->>Network: create_socket_and_bind()
+        Network->>Network: Create socket, bind, listen
+        Network-->>WebServers: Socket created
+        
+        WebServers->>WebServers: start_second_webserver() on port 80
+        WebServers->>WebServers: Register handlers for second server
+        
+        alt Internal ADC (USE_EXTERNAL_ADC not defined)
+            WebServers->>DataTrans: Release (wifi_operation_requested = 0)
+        end
+        
+        WebServers-->>Client: Return connection status JSON (IP, port, success)
+        
+    else Use Internal AP Mode
+        Client->>WebServers: GET /internal_mode
+        
+        alt Internal ADC (USE_EXTERNAL_ADC not defined)
+            WebServers->>DataTrans: Request pause (wifi_operation_requested = 1)
+            DataTrans->>DataTrans: Check wifi_operation_requested flag
+            DataTrans->>Acquisition: stop_adc_sampling()
+            Acquisition->>Acquisition: adc_continuous_stop()
+            Acquisition->>Acquisition: Delay 20ms
+            Acquisition->>Acquisition: adc_continuous_deinit()
+            Acquisition->>Acquisition: atomic_store(&adc_is_running, false)
+            DataTrans->>DataTrans: Acknowledge (wifi_operation_acknowledged = 1)
+        end
+        
+        WebServers->>Network: get_ap_ip_info()
+        Network->>Network: esp_netif_get_ip_info() for AP interface
+        Network-->>WebServers: AP IP info
+        
+        WebServers->>Network: safe_close() existing socket
+        WebServers->>Network: Create and bind socket to AP IP
+        Network-->>WebServers: Socket ready
+        
+        alt Internal ADC (USE_EXTERNAL_ADC not defined)
+            WebServers->>DataTrans: Release (wifi_operation_requested = 0)
+        end
+        
+        WebServers-->>Client: Return socket IP and port JSON
+    end
+    
+    %% Oscilloscope Configuration Phase
+    Client->>WebServers: GET /config
+    WebServers->>Acquisition: get_sampling_frequency()
+    WebServers->>Acquisition: get_bits_per_packet()
+    WebServers->>Acquisition: get_data_mask()
+    WebServers->>Acquisition: get_channel_mask()
+    WebServers->>Acquisition: get_useful_bits()
+    WebServers->>Acquisition: get_samples_per_packet()
+    WebServers->>Acquisition: dividing_factor()
+    WebServers->>Acquisition: get_discard_head()
+    WebServers->>Acquisition: get_discard_trailer()
+    WebServers->>Acquisition: get_max_bits()
+    WebServers->>Acquisition: get_mid_bits()
+    WebServers->>Acquisition: get_voltage_scales()
+    WebServers->>Acquisition: get_voltage_scales_count()
+    Acquisition-->>WebServers: Configuration values
+    WebServers-->>Client: Return configuration JSON
+    
+    Client->>WebServers: POST /trigger
+    WebServers->>WebServers: Parse JSON (trigger_edge, trigger_percentage)
+    WebServers->>DataTrans: Update trigger_edge (1=positive, 0=negative)
+    alt External ADC & Single Mode (USE_EXTERNAL_ADC & mode==1)
+        WebServers->>Acquisition: Configure PCNT edge action based on trigger_edge
+    end
+    WebServers->>Acquisition: set_trigger_level(percentage)
+    Acquisition->>Acquisition: Convert percentage to PWM duty cycle
+    Acquisition->>Acquisition: ledc_set_duty() & ledc_update_duty()
+    Acquisition-->>WebServers: ESP_OK
+    WebServers-->>Client: Trigger configuration response
+    
+    %% Acquisition Mode Selection
+    alt Single-shot Mode
+        Client->>WebServers: GET /single
+        WebServers->>DataTrans: set_single_trigger_mode()
+        DataTrans->>DataTrans: mode = 1
+        
+        alt External ADC (USE_EXTERNAL_ADC defined)
+            DataTrans->>Acquisition: pcnt_unit_start()
+            DataTrans->>Acquisition: Configure PCNT edge action based on trigger_edge
+            DataTrans->>Acquisition: Get initial count state
+        else Internal ADC (USE_EXTERNAL_ADC not defined)
+            DataTrans->>DataTrans: Sample GPIO state (last_state = gpio_get_level())
+        end
+        
+        DataTrans-->>WebServers: ESP_OK
+        WebServers-->>Client: Mode response {"mode":"Single"}
+    else Continuous Mode
+        Client->>WebServers: GET /normal
+        WebServers->>DataTrans: set_continuous_mode()
+        DataTrans->>DataTrans: mode = 0
+        DataTrans->>Acquisition: set_trigger_level(0)
+        
+        alt External ADC (USE_EXTERNAL_ADC defined)
+            DataTrans->>Acquisition: pcnt_unit_stop()
+        end
+        
+        DataTrans-->>WebServers: ESP_OK
+        WebServers-->>Client: Mode response {"mode":"Normal"}
+    end
+    
+    %% Sampling Rate Adjustment
+    Client->>WebServers: POST /freq
+    WebServers->>WebServers: Parse action ("more" or "less")
+    
+    alt External ADC (USE_EXTERNAL_ADC defined)
+        WebServers->>WebServers: Adjust spi_index based on action
+        WebServers->>Acquisition: Take spi_mutex
+        WebServers->>Acquisition: spi_bus_remove_device(spi)
+        WebServers->>Acquisition: Reconfigure SPI with spi_matrix[spi_index]
+        WebServers->>Acquisition: spi_bus_add_device()
+        WebServers->>Acquisition: mcpwm_timer_set_period()
+        WebServers->>Acquisition: mcpwm_comparator_set_compare_value()
+        WebServers->>Acquisition: Release spi_mutex
+        WebServers->>Acquisition: spi_device_get_actual_freq()
+    else Internal ADC (USE_EXTERNAL_ADC not defined)
+        WebServers->>WebServers: Update adc_divider (1,2,4,8,16)
+        WebServers->>WebServers: Set adc_modify_freq = 1
+        Note over DataTrans,Acquisition: ADC reconfiguration happens in socket_task
+    end
+    WebServers-->>Client: Return updated sampling_frequency JSON
+    
+    %% Data Streaming Preparation
+    Client->>DataTrans: Connect to socket (TCP)
+    DataTrans->>DataTrans: accept() new client connection
+    
+    alt Internal ADC (USE_EXTERNAL_ADC not defined)
+        DataTrans->>Acquisition: start_adc_sampling()
+        Acquisition->>Acquisition: Check if already initializing or running
+        Acquisition->>Acquisition: Create ADC continuous handle
+        Acquisition->>Acquisition: Configure ADC pattern (12dB atten, channel, bit width)
+        Acquisition->>Acquisition: Configure continuous ADC (SAMPLE_RATE_HZ/adc_divider)
+        Acquisition->>Acquisition: adc_continuous_config()
+        Acquisition->>Acquisition: adc_continuous_start()
+        Acquisition->>Acquisition: atomic_store(&adc_is_running, true)
+        Acquisition-->>DataTrans: ADC sampling started
+    end
+    
+    %% Data Streaming Phase
+    loop Until disconnection or socket change
+        alt Internal ADC & Freq Change (USE_EXTERNAL_ADC not defined & adc_modify_freq == 1)
+            DataTrans->>Acquisition: config_adc_sampling()
+            Acquisition->>Acquisition: stop_adc_sampling()
+            Acquisition->>Acquisition: adc_continuous_new_handle()
+            Acquisition->>Acquisition: Configure ADC with updated frequency
+            Acquisition->>Acquisition: wait_convertion_time = WAIT_ADC_CONV_TIME * adc_divider
+            Acquisition->>Acquisition: adc_continuous_start()
+            DataTrans->>DataTrans: adc_modify_freq = 0
+        end
+        
+        alt mode == 1 (Single Trigger)
+            alt External ADC (USE_EXTERNAL_ADC defined)
+                DataTrans->>Acquisition: Take spi_mutex
+                DataTrans->>Acquisition: spi_device_polling_transmit()
+                DataTrans->>Acquisition: Release spi_mutex
+                DataTrans->>Acquisition: pcnt_unit_get_count()
+                DataTrans->>DataTrans: Check for edge (current_state vs last_state)
+                DataTrans->>DataTrans: last_state = current_state
+                
+                alt Edge detected
+                    DataTrans->>Client: non_blocking_send() data buffer
+                end
+            else Internal ADC (USE_EXTERNAL_ADC not defined)
+                DataTrans->>DataTrans: Record current tick time
+                DataTrans->>DataTrans: current_state = gpio_get_level(SINGLE_INPUT_PIN)
+                DataTrans->>DataTrans: Check for specified edge
+                DataTrans->>DataTrans: last_state = current_state
+                
+                alt Edge detected
+                    DataTrans->>DataTrans: Calculate and delay for precise timing
+                    DataTrans->>Acquisition: adc_continuous_read()
+                    Acquisition-->>DataTrans: Data buffer
+                    DataTrans->>Client: non_blocking_send() data buffer
+                end
+            end
+        else mode == 0 (Continuous)
+            alt External ADC (USE_EXTERNAL_ADC defined)
+                DataTrans->>Acquisition: Take spi_mutex
+                DataTrans->>Acquisition: spi_device_polling_transmit()
+                DataTrans->>Acquisition: Release spi_mutex
+                DataTrans->>Client: non_blocking_send() data buffer
+            else Internal ADC (USE_EXTERNAL_ADC not defined)
+                DataTrans->>DataTrans: vTaskDelay(wait_convertion_time)
+                DataTrans->>Acquisition: adc_continuous_read()
+                Acquisition-->>DataTrans: Data buffer
+                DataTrans->>Client: non_blocking_send() data buffer
+            end
+        end
+        
+        alt Internal ADC & WiFi Request (USE_EXTERNAL_ADC not defined & wifi_operation_requested)
+            DataTrans->>DataTrans: Break acquisition loop
+        end
+    end
+    
+    alt Internal ADC (USE_EXTERNAL_ADC not defined)
+        DataTrans->>Acquisition: stop_adc_sampling()
+    end
+    
+    Client->>DataTrans: Disconnect
+    DataTrans->>Network: safe_close(client_sock)
+    DataTrans->>DataTrans: Reset client_sock = -1
+    deactivate DataTrans

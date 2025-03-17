@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant Main as main.c
+    participant Crypto as crypto.c
+    participant Network as network.c
+    participant WebServers as webservers.c
+    
+    Main->>Main: app_main()
+    Main->>Main: Initialize NVS
+    Main->>Main: Initialize network stack
+    
+    Main->>Crypto: init_crypto()
+    Crypto-->>Main: Create key_gen_semaphore
+    Main->>Crypto: Create generate_key_pair_task
+    activate Crypto
+    Crypto->>Crypto: Generate RSA key pair (3072 bits)
+    Crypto->>Main: Signal completion (semaphore)
+    deactivate Crypto
+    
+    Main->>Network: wifi_init()
+    Network->>Network: Configure AP+STA mode
+    Network-->>Main: WiFi initialized
+    
+    Main->>WebServers: start_webserver()
+    WebServers->>WebServers: Register HTTP handlers
+    WebServers-->>Main: Server started (port 81)
+    
+    Main->>Main: Create socket_task on core 1
+    Main->>Main: LED on - system ready

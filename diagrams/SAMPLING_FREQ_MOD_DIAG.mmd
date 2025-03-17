@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant Client as Client
+    participant WebServers as webservers.c
+    participant DataTrans as data_transmission.c
+    participant Acquisition as acquisition.c
+    
+    Client->>WebServers: POST /freq {"action":"more/less"}
+    
+    alt External ADC
+        WebServers->>WebServers: Adjust spi_index based on action
+        WebServers->>Acquisition: Take spi_mutex
+        WebServers->>Acquisition: spi_bus_remove_device(spi)
+        WebServers->>Acquisition: Configure with spi_matrix[spi_index]
+        WebServers->>Acquisition: spi_bus_add_device()
+        WebServers->>Acquisition: Update MCPWM timing parameters
+        WebServers->>Acquisition: Release spi_mutex
+        WebServers->>Acquisition: Get actual frequency
+    else Internal ADC
+        WebServers->>WebServers: Update adc_divider (1,2,4,8,16)
+        WebServers->>WebServers: adc_modify_freq = 1
+        
+        Note over WebServers,DataTrans: Reconfiguration happens in socket_task
+        
+        DataTrans->>Acquisition: config_adc_sampling()
+        Acquisition->>Acquisition: stop_adc_sampling()
+        Acquisition->>Acquisition: Create new ADC handle
+        Acquisition->>Acquisition: Configure with new frequency
+        Acquisition->>Acquisition: adc_continuous_start()
+        DataTrans->>DataTrans: adc_modify_freq = 0
+    end
+    
+    WebServers-->>Client: {"sampling_frequency": value}

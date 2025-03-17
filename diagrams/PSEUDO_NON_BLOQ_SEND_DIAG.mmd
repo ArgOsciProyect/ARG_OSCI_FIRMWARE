@@ -1,0 +1,42 @@
+sequenceDiagram
+    participant DataTrans as data_transmission.c
+    participant Client as Client
+    
+    DataTrans->>DataTrans: non_blocking_send(buffer, len)
+    
+    alt First call (!send_in_progress)
+        DataTrans->>DataTrans: Store buffer information
+        DataTrans->>DataTrans: socket_at_start = new_sock
+        DataTrans->>DataTrans: Make socket non-blocking
+    end
+    
+    loop pending_send_offset < pending_send_size
+        alt Internal ADC & WiFi operation requested
+            DataTrans->>DataTrans: Restore socket to blocking mode
+            DataTrans->>DataTrans: send_in_progress = false
+            DataTrans-->>DataTrans: Return ESP_ERR_TIMEOUT
+        end
+        
+        alt Socket changed (External ADC)
+            DataTrans->>DataTrans: Restore socket to blocking mode
+            DataTrans->>DataTrans: send_in_progress = false
+            DataTrans-->>DataTrans: Return ESP_FAIL
+        end
+        
+        DataTrans->>Client: send() data chunk
+        
+        alt sent > 0
+            DataTrans->>DataTrans: Update pending_send_offset
+        else sent < 0 with EAGAIN/EWOULDBLOCK
+            DataTrans->>DataTrans: vTaskDelay(10ms)
+            Note over DataTrans: Continue trying
+        else Error
+            DataTrans->>DataTrans: Restore socket to blocking mode
+            DataTrans->>DataTrans: send_in_progress = false
+            DataTrans-->>DataTrans: Return ESP_FAIL
+        end
+    end
+    
+    DataTrans->>DataTrans: Restore socket to blocking mode
+    DataTrans->>DataTrans: send_in_progress = false
+    DataTrans-->>DataTrans: Return ESP_OK

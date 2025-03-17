@@ -1,0 +1,178 @@
+sequenceDiagram
+    participant Main as main.c
+    participant Acquisition as acquisition.c
+    participant Network as network.c
+    participant WebServers as webservers.c
+    participant Crypto as crypto.c
+    participant DataTrans as data_transmission.c
+    participant Client as Client
+
+    %% System Initialization Phase
+    Main->>Main: app_main()
+    Main->>Main: Initialize NVS & network stack
+    
+    %% Crypto Initialization
+    Main->>Crypto: init_crypto()
+    Main->>Crypto: Create generate_key_pair_task
+    activate Crypto
+    Crypto->>Crypto: Generate RSA key pair (3072 bits)
+    Crypto->>Main: Signal completion (semaphore)
+    deactivate Crypto
+    
+    %% Hardware Initialization
+    Main->>Acquisition: Initialize signal generators (sine, square wave, PWM)
+    
+    alt External ADC
+        Main->>Acquisition: spi_master_init()
+        Main->>Acquisition: init_mcpwm_trigger()
+        Main->>Acquisition: init_pulse_counter()
+    end
+    
+    Main->>Acquisition: Initialize timer & GPIO pins
+    Main->>Network: configure_led_gpio()
+    
+    %% Network & WebServer Initialization
+    Main->>Network: wifi_init() - AP+STA mode
+    Main->>WebServers: start_webserver() - port 81
+    Main->>DataTrans: data_transmission_init()
+    
+    %% Start Main Data Task
+    Main->>DataTrans: Create socket_task on core 1
+    Main->>Network: Set LED to indicate ready
+    
+    %% Socket Task Startup
+    activate DataTrans
+    DataTrans->>DataTrans: socket_task() initializes
+    
+    %% Client Connection Phase
+    Client->>WebServers: GET /get_public_key
+    WebServers->>Crypto: get_public_key()
+    Crypto-->>WebServers: Return public key
+    WebServers-->>Client: Return public key JSON
+    
+    alt Connect to External WiFi
+        Client->>WebServers: POST /connect_wifi (encrypted credentials)
+        WebServers->>Crypto: Decrypt credentials
+        
+        alt Internal ADC
+            WebServers->>DataTrans: Request pause (atomic flag)
+            DataTrans->>Acquisition: stop_adc_sampling()
+            DataTrans->>DataTrans: Acknowledge pause
+        end
+        
+        WebServers->>Network: Configure WiFi & connect
+        WebServers->>Network: wait_for_ip()
+        WebServers->>Network: Handle socket reconfiguration
+        WebServers->>WebServers: start_second_webserver() - port 80
+        
+        alt Internal ADC
+            WebServers->>DataTrans: Release pause flag
+        end
+        
+        WebServers-->>Client: Return connection status
+        
+    else Use Internal AP Mode
+        Client->>WebServers: GET /internal_mode
+        
+        alt Internal ADC
+            WebServers->>DataTrans: Request pause (atomic flag)
+            DataTrans->>Acquisition: stop_adc_sampling()
+            DataTrans->>DataTrans: Acknowledge pause
+        end
+        
+        WebServers->>Network: get_ap_ip_info()
+        WebServers->>Network: Handle socket reconfiguration
+        
+        alt Internal ADC
+            WebServers->>DataTrans: Release pause flag
+        end
+        
+        WebServers-->>Client: Return socket info
+    end
+    
+    %% Oscilloscope Configuration Phase
+    Client->>WebServers: GET /config
+    WebServers->>Acquisition: Query multiple configuration parameters
+    Acquisition-->>WebServers: Return configuration values
+    WebServers-->>Client: Return configuration JSON
+    
+    %% Trigger Configuration
+    Client->>WebServers: POST /trigger {edge, percentage}
+    WebServers->>DataTrans: Update trigger_edge
+    alt External ADC & Single Mode
+        WebServers->>Acquisition: Configure PCNT edge action
+    end
+    WebServers->>Acquisition: set_trigger_level(percentage)
+    WebServers-->>Client: Trigger configuration response
+    
+    %% Acquisition Mode Selection
+    alt Single-shot Mode
+        Client->>WebServers: GET /single
+        WebServers->>DataTrans: set_single_trigger_mode()
+        
+        alt External ADC
+            DataTrans->>Acquisition: Configure pulse counter for edge detection
+        else Internal ADC
+            DataTrans->>DataTrans: Sample initial GPIO state
+        end
+        
+        WebServers-->>Client: {"mode":"Single"}
+    else Continuous Mode
+        Client->>WebServers: GET /normal
+        WebServers->>DataTrans: set_continuous_mode()
+        WebServers-->>Client: {"mode":"Normal"}
+    end
+    
+    %% Sampling Rate Adjustment
+    Client->>WebServers: POST /freq {action}
+    
+    alt External ADC
+        WebServers->>Acquisition: Reconfigure SPI & MCPWM with new timing
+    else Internal ADC
+        WebServers->>WebServers: Set adc_modify_freq flag
+    end
+    WebServers-->>Client: Return updated frequency
+    
+    %% Data Streaming
+    Client->>DataTrans: Connect to data socket
+    
+    alt Internal ADC
+        DataTrans->>Acquisition: start_adc_sampling()
+    end
+    
+    loop Until disconnection
+        alt Internal ADC & Frequency Change Requested
+            DataTrans->>Acquisition: config_adc_sampling()
+        end
+        
+        alt Mode == Single Trigger
+            alt External ADC
+                DataTrans->>Acquisition: SPI transaction & check PCNT
+                alt Edge Detected
+                    DataTrans->>Client: Send data buffer
+                end
+            else Internal ADC
+                DataTrans->>DataTrans: Check GPIO for trigger condition
+                alt Edge Detected
+                    DataTrans->>Acquisition: adc_continuous_read()
+                    DataTrans->>Client: Send data buffer
+                end
+            end
+        else Mode == Continuous
+            alt External ADC
+                DataTrans->>Acquisition: SPI transaction
+                DataTrans->>Client: Send data buffer
+            else Internal ADC
+                DataTrans->>Acquisition: adc_continuous_read()
+                DataTrans->>Client: Send data buffer
+            end
+        end
+        
+        alt WiFi Operation Requested
+            DataTrans->>DataTrans: Break acquisition loop
+        end
+    end
+    
+    Client->>DataTrans: Disconnect
+    DataTrans->>Network: safe_close(client_sock)
+    deactivate DataTrans
