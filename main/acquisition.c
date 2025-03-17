@@ -316,14 +316,35 @@ void config_adc_sampling(void)
     stop_adc_sampling();
     ESP_LOGI(TAG, "Stopped ADC");
 
-    // Configuration of the continuous ADC handle
-    adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = BUF_SIZE * 2,
-        .conv_frame_size = 128,
-        .flags.flush_pool = false,
-    };
+    // Add delay to ensure memory is properly freed
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &adc_handle));
+    // Try multiple times to allocate memory for the ADC handle
+    esp_err_t ret = ESP_ERR_NO_MEM;
+    int retry_count = 0;
+    const int max_retries = 5;
+
+    while (ret == ESP_ERR_NO_MEM && retry_count < max_retries) {
+        // Configuration of the continuous ADC handle
+        adc_continuous_handle_cfg_t adc_config = {
+            .max_store_buf_size = BUF_SIZE * 2,
+            .conv_frame_size = 128,
+            .flags.flush_pool = true, // Set to true to force cleanup
+        };
+
+        ret = adc_continuous_new_handle(&adc_config, &adc_handle);
+
+        if (ret == ESP_ERR_NO_MEM) {
+            ESP_LOGW(TAG, "Memory allocation failed, retrying... (%d/%d)", retry_count + 1, max_retries);
+            vTaskDelay(pdMS_TO_TICKS(100)); // Wait before retrying
+            retry_count++;
+        }
+    }
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create ADC handle after %d attempts: %s", retry_count, esp_err_to_name(ret));
+        return;
+    }
 
     // Configure the ADC sampling pattern
     adc_digi_pattern_config_t adc_pattern = {
@@ -336,14 +357,29 @@ void config_adc_sampling(void)
                                                  .conv_mode = ADC_CONV_SINGLE_UNIT_1,
                                                  .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1};
 
-    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &continuous_config));
+    ret = adc_continuous_config(adc_handle, &continuous_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure ADC: %s", esp_err_to_name(ret));
+        adc_continuous_deinit(adc_handle);
+        return;
+    }
+
     ESP_LOGI(TAG, "Configured ADC");
 
     // Update the wait time for conversion
     wait_convertion_time = WAIT_ADC_CONV_TIME * adc_divider;
 
     // Start the ADC again
-    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
+    ret = adc_continuous_start(adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start ADC: %s", esp_err_to_name(ret));
+        adc_continuous_deinit(adc_handle);
+        return;
+    }
+
+    // Set ADC as running
+    atomic_store(&adc_is_running, true);
+
     ESP_LOGI(TAG, "Started ADC");
 }
 #endif
