@@ -210,21 +210,23 @@ void start_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
-    // If already initializing, don't try again
+    // Always try to stop any potentially running ADC first
+    if (atomic_load(&adc_is_running)) {
+        ESP_LOGI(TAG, "Stopping any existing ADC before starting");
+        stop_adc_sampling();
+
+        // Wait for cleanup to complete
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    // Set initializing flag to prevent concurrent starts
     if (atomic_exchange(&adc_initializing, true)) {
         ESP_LOGW(TAG, "ADC initialization already in progress");
         return;
     }
 
-    // Check if ADC is already running
-    if (atomic_load(&adc_is_running)) {
-        ESP_LOGW(TAG, "ADC is already running, skipping initialization");
-        atomic_store(&adc_initializing, false);
-        return;
-    }
-
-    // Add a small delay to ensure system resources are properly released
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // Long delay to ensure system is ready
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // Configure ADC pattern
     adc_digi_pattern_config_t adc_pattern = {
@@ -237,13 +239,33 @@ void start_adc_sampling(void)
         .flags.flush_pool = false,
     };
 
-    esp_err_t ret = adc_continuous_new_handle(&adc_config, &adc_handle);
+    // Try initialization with retries
+    esp_err_t ret = ESP_FAIL;
+    int retry_count = 0;
+    const int max_retries = 5;
+
+    while (retry_count < max_retries) {
+        ret = adc_continuous_new_handle(&adc_config, &adc_handle);
+
+        if (ret == ESP_OK) {
+            break;
+        }
+
+        ESP_LOGW(TAG, "ADC initialization attempt %d failed: %s", retry_count + 1, esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(300));
+        retry_count++;
+    }
+
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create ADC handle: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to create ADC handle after %d attempts", max_retries);
         atomic_store(&adc_initializing, false);
         return;
     }
 
+    // Delay after handle creation
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Configure ADC
     adc_continuous_config_t continuous_config = {.pattern_num = 1,
                                                  .adc_pattern = &adc_pattern,
                                                  .sample_freq_hz = SAMPLE_RATE_HZ / adc_divider,
@@ -258,6 +280,10 @@ void start_adc_sampling(void)
         return;
     }
 
+    // Delay after configuration
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Start ADC
     ret = adc_continuous_start(adc_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start ADC: %s", esp_err_to_name(ret));
@@ -277,47 +303,45 @@ void stop_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Stopping ADC sampling");
 
-    // If we're in the middle of initialization, don't try to stop
-    if (atomic_load(&adc_initializing)) {
-        ESP_LOGW(TAG, "ADC is currently initializing, can't stop now");
+    // Only proceed if ADC is running
+    if (!atomic_exchange(&adc_is_running, false)) {
+        ESP_LOGW(TAG, "ADC was not running, nothing to stop");
         return;
     }
 
-    // Only attempt to stop if ADC is running
-    if (atomic_load(&adc_is_running)) {
-        esp_err_t ret;
-
-        // First stop
-        ret = adc_continuous_stop(adc_handle);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to stop ADC: %s", esp_err_to_name(ret));
-        }
-
-        // Add a delay before deinitializing
-        vTaskDelay(pdMS_TO_TICKS(20));
-
-        // Then deinitialize
-        ret = adc_continuous_deinit(adc_handle);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to deinitialize ADC: %s", esp_err_to_name(ret));
-        }
-
-        atomic_store(&adc_is_running, false);
-    } else {
-        ESP_LOGW(TAG, "ADC was not running, nothing to stop");
+    // First stop the ADC
+    esp_err_t ret = adc_continuous_stop(adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop ADC: %s", esp_err_to_name(ret));
     }
-}
 
+    // Add significant delay before deinitializing
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Then deinitialize
+    ret = adc_continuous_deinit(adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to deinitialize ADC: %s", esp_err_to_name(ret));
+    }
+
+    // Add extra delay after deinitialization
+    vTaskDelay(pdMS_TO_TICKS(300));
+}
 void config_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Reconfiguring ADC with new frequency: %d Hz", SAMPLE_RATE_HZ / adc_divider);
 
-    // Stop and deinitialize the ADC
-    stop_adc_sampling();
-    ESP_LOGI(TAG, "Stopped ADC");
+    // First make sure ADC is fully stopped
+    if (atomic_load(&adc_is_running)) {
+        stop_adc_sampling();
+        ESP_LOGI(TAG, "Stopped ADC");
+    }
 
-    // Add delay to ensure memory is properly freed
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Add significant delay to ensure memory is properly freed
+    vTaskDelay(pdMS_TO_TICKS(300));
+
+    // Make sure we're not in an initializing state
+    atomic_store(&adc_initializing, false);
 
     // Try multiple times to allocate memory for the ADC handle
     esp_err_t ret = ESP_ERR_NO_MEM;
@@ -325,18 +349,22 @@ void config_adc_sampling(void)
     const int max_retries = 5;
 
     while (ret == ESP_ERR_NO_MEM && retry_count < max_retries) {
+        // Add a delay between attempts
+        if (retry_count > 0) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
         // Configuration of the continuous ADC handle
         adc_continuous_handle_cfg_t adc_config = {
             .max_store_buf_size = BUF_SIZE * 2,
             .conv_frame_size = 128,
-            .flags.flush_pool = true, // Set to true to force cleanup
+            .flags.flush_pool = false,
         };
 
         ret = adc_continuous_new_handle(&adc_config, &adc_handle);
 
         if (ret == ESP_ERR_NO_MEM) {
             ESP_LOGW(TAG, "Memory allocation failed, retrying... (%d/%d)", retry_count + 1, max_retries);
-            vTaskDelay(pdMS_TO_TICKS(100)); // Wait before retrying
             retry_count++;
         }
     }
@@ -345,6 +373,9 @@ void config_adc_sampling(void)
         ESP_LOGE(TAG, "Failed to create ADC handle after %d attempts: %s", retry_count, esp_err_to_name(ret));
         return;
     }
+
+    // Short delay after handle creation
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // Configure the ADC sampling pattern
     adc_digi_pattern_config_t adc_pattern = {
@@ -368,6 +399,9 @@ void config_adc_sampling(void)
 
     // Update the wait time for conversion
     wait_convertion_time = WAIT_ADC_CONV_TIME * adc_divider;
+
+    // Short delay before starting
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // Start the ADC again
     ret = adc_continuous_start(adc_handle);
