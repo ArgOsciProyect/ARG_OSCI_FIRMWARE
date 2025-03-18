@@ -237,7 +237,7 @@ void start_adc_sampling(void)
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
-        .flags.flush_pool = true, // Important: flush the pool to clear memory
+        .flags.flush_pool = false, // Important: flush the pool to clear memory
     };
 
     // Try initialization with retries

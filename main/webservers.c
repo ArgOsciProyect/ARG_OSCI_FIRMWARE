@@ -533,6 +533,7 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config)
     cJSON_Delete(root);
     return ESP_OK;
 }
+
 esp_err_t connect_wifi_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Connecting to Wi-Fi network");
@@ -546,6 +547,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
 #ifndef USE_EXTERNAL_ADC
     // Request socket task to pause ADC operations
+    ESP_LOGI(TAG, "Pausing ADC operations for WiFi configuration");
     atomic_store(&wifi_operation_requested, 1);
 
     // Wait for acknowledgment with timeout
@@ -557,8 +559,25 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     if (timeout_count >= 500) {
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
-        // Continue anyway, but there might be issues
     }
+
+    // Make sure the ADC is fully stopped and reset all flags
+    if (atomic_load(&adc_is_running) || atomic_load(&adc_initializing)) {
+        ESP_LOGI(TAG, "Stopping ADC for WiFi connection");
+        stop_adc_sampling();
+
+        // Extra delay to ensure ADC resources are fully released
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Ensure flags are cleared
+        atomic_store(&adc_is_running, false);
+        atomic_store(&adc_initializing, false);
+
+        ESP_LOGI(TAG, "ADC flags reset for clean state");
+    }
+
+    // Extra safety delay before proceeding with network changes
+    vTaskDelay(pdMS_TO_TICKS(200));
 #else
     ESP_LOGI(TAG, "===== CRITICAL: Socket reset for connect_wifi =====");
     force_socket_cleanup(); // Use the stronger cleanup mechanism
