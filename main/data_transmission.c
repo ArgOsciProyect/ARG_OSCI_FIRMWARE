@@ -479,7 +479,12 @@ void socket_task(void *pvParameters)
 #ifdef USE_EXTERNAL_ADC
         // We don't need to declare ret here since it's already declared and initialized above
 #else
-        start_adc_sampling();
+        if (!atomic_load(&adc_is_running) && !atomic_load(&adc_initializing)) {
+            ESP_LOGI(TAG, "Starting ADC sampling from socket task");
+            start_adc_sampling();
+        } else {
+            ESP_LOGW(TAG, "ADC already running or initializing, not starting again");
+        }
 #endif
 
         bool data_transfer_complete = false;

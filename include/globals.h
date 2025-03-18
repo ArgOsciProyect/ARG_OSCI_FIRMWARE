@@ -22,7 +22,7 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_continuous.h"
 
-//#define USE_EXTERNAL_ADC // Comment to use internal ADC
+// #define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"
@@ -127,6 +127,7 @@ extern uint64_t wait_time_us;
 extern atomic_int wifi_operation_requested;
 extern atomic_int wifi_operation_acknowledged;
 extern atomic_bool adc_is_running;
+extern atomic_bool adc_initializing; // Add this line
 #else
 extern SemaphoreHandle_t spi_mutex;
 extern atomic_int socket_reset_requested;

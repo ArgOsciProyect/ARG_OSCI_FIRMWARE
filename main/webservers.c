@@ -633,15 +633,29 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         timeout_count++;
     }
 
-    if (timeout_count >= 500) {
-        ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
-        // Continue anyway, but there might be issues
+    // Make sure ADC is fully stopped and its memory freed
+    if (atomic_load(&adc_is_running) || atomic_load(&adc_initializing)) {
+        ESP_LOGI(TAG, "Stopping ADC for internal mode transition");
+        stop_adc_sampling();
+
+        // Extra delay to ensure ADC resources are fully released
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Ensure flags are cleared
+        atomic_store(&adc_is_running, false);
+        atomic_store(&adc_initializing, false);
+
+        ESP_LOGI(TAG, "ADC flags reset for clean state");
     }
+
+    // Extra safety delay before proceeding with network changes
+    vTaskDelay(pdMS_TO_TICKS(200));
 #else
-    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for connect_wifi =====");
-    force_socket_cleanup(); // Use the stronger cleanup mechanism
-    ESP_LOGI(TAG, "===== Socket reset for connect_wifi completed =====");
+    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for internal_mode =====");
+    force_socket_cleanup();
+    ESP_LOGI(TAG, "===== Socket reset for internal_mode completed =====");
 #endif
+
     // Now it's safe to modify WiFi configuration
     esp_netif_ip_info_t ip_info;
     if (get_ap_ip_info(&ip_info) != ESP_OK) {
@@ -696,7 +710,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     }
 
 #ifndef USE_EXTERNAL_ADC
-    // Allow socket task to resume
+    // Allow socket task to resume with clean ADC state
     atomic_store(&wifi_operation_requested, 0);
 #endif
 
