@@ -271,7 +271,9 @@ esp_err_t single_handler(httpd_req_t *req)
 
 esp_err_t freq_handler(httpd_req_t *req)
 {
+#ifdef USE_EXTERNAL_ADC
     int final_freq;
+#endif
     char content[100];
     int received = httpd_req_recv(req, content, sizeof(content) - 1);
     if (received <= 0) {
@@ -381,6 +383,10 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#else
+    // Signal socket task to close any client connections
+    ESP_LOGI(TAG, "Requesting socket reset before resetting socket");
+    request_socket_reset();
 #endif
 
     // Get appropriate IP information based on request origin port
@@ -527,7 +533,6 @@ esp_err_t parse_wifi_credentials(httpd_req_t *req, wifi_config_t *wifi_config)
     cJSON_Delete(root);
     return ESP_OK;
 }
-
 esp_err_t connect_wifi_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Connecting to Wi-Fi network");
@@ -554,6 +559,10 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#else
+    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for connect_wifi =====");
+    force_socket_cleanup(); // Use the stronger cleanup mechanism
+    ESP_LOGI(TAG, "===== Socket reset for connect_wifi completed =====");
 #endif
 
     // Now it's safe to modify WiFi configuration
@@ -611,7 +620,6 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     return ret;
 }
-
 esp_err_t internal_mode_handler(httpd_req_t *req)
 {
 #ifndef USE_EXTERNAL_ADC
@@ -629,8 +637,11 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#else
+    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for connect_wifi =====");
+    force_socket_cleanup(); // Use the stronger cleanup mechanism
+    ESP_LOGI(TAG, "===== Socket reset for connect_wifi completed =====");
 #endif
-
     // Now it's safe to modify WiFi configuration
     esp_netif_ip_info_t ip_info;
     if (get_ap_ip_info(&ip_info) != ESP_OK) {
@@ -707,7 +718,6 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Socket created for internal mode - IP: %s, Port: %d", ip_str, new_port);
     return send_internal_mode_response(req, ip_str, new_port);
 }
-
 esp_err_t get_public_key_handler(httpd_req_t *req)
 {
     // Configure CORS headers

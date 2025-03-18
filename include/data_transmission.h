@@ -21,6 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "globals.h"
+
 /**
  * @brief Initialize data transmission subsystem
  *
@@ -35,7 +37,8 @@ esp_err_t data_transmission_init(void);
  *
  * This task accepts connections from clients, acquires data from ADC or SPI,
  * and streams the data to connected clients. It supports both continuous
- * and trigger-based acquisition modes.
+ * and trigger-based acquisition modes. In external ADC mode, it also responds
+ * to socket reset requests to safely close connections when needed.
  *
  * @param pvParameters Parameters for the task (unused)
  */
@@ -65,6 +68,31 @@ esp_err_t send_data_packet(int client_sock, uint8_t *buffer, size_t sample_size,
  */
 esp_err_t set_single_trigger_mode(void);
 
+#ifdef USE_EXTERNAL_ADC
+/**
+ * @brief Request a reset of all socket connections
+ *
+ * Sets the socket_reset_requested flag to trigger the socket_task to close
+ * any active client connections. This function waits for the flag to be processed
+ * or times out after a delay.
+ *
+ * @note This function is only available in USE_EXTERNAL_ADC mode.
+ */
+void request_socket_reset(void);
+
+/**
+ * @brief Force immediate cleanup of all socket connections
+ *
+ * Requests socket_task to close client connections and also forcibly closes
+ * the listening socket. This function is more aggressive than request_socket_reset
+ * and ensures all socket resources are released promptly.
+ *
+ * @note This function is only available in USE_EXTERNAL_ADC mode.
+ */
+void force_socket_cleanup(void);
+
+#endif
+
 /**
  * @brief Switch to continuous acquisition mode
  *
@@ -90,6 +118,7 @@ bool is_triggered(int current, int last);
  * @brief Send data packet to connected client in a non-blocking manner
  *
  * Transmits a buffer of data to the currently connected client over TCP in a non-blocking way.
+ * In external ADC mode, also monitors for socket changes and reset requests during sending.
  *
  * @param client_sock Socket descriptor for the connected client
  * @param buffer Data buffer to send
@@ -98,7 +127,6 @@ bool is_triggered(int current, int last);
  * @return ESP_OK on success, ESP_FAIL on error, ESP_ERR_TIMEOUT if a WiFi operation is requested
  */
 esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags);
-
 /**
  * @brief Acquire data from the configured ADC
  *

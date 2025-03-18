@@ -10,6 +10,11 @@
 
 static const char *TAG = "DATA_TRANS";
 
+static uint8_t *pending_send_buffer = NULL;
+static size_t pending_send_size = 0;
+static size_t pending_send_offset = 0;
+static bool send_in_progress = false;
+
 /**
  * @brief Acquisition mode (0: continuous, 1: single trigger)
  */
@@ -35,6 +40,9 @@ atomic_int wifi_operation_requested = ATOMIC_VAR_INIT(0);
 atomic_int wifi_operation_acknowledged = ATOMIC_VAR_INIT(0);
 #endif
 
+#ifdef USE_EXTERNAL_ADC
+atomic_int socket_reset_requested = ATOMIC_VAR_INIT(0);
+#endif
 esp_err_t data_transmission_init(void)
 {
     ESP_LOGI(TAG, "Initializing data transmission subsystem");
@@ -51,7 +59,7 @@ esp_err_t acquire_data(uint8_t *buffer, size_t buffer_size, uint32_t *bytes_read
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = 0;
-    t.rxlength = buffer_size * 8; // in bits
+    t.rxlength = buffer_size * 8; // in bitsº
     t.rx_buffer = buffer;
     t.flags = 0;
 
@@ -175,16 +183,57 @@ esp_err_t send_data_packet(int client_sock, uint8_t *buffer, size_t sample_size,
     return ESP_OK;
 }
 
-// Add these variables to data_transmission.c (at the top with other global variables)
-static uint8_t *pending_send_buffer = NULL;
-static size_t pending_send_size = 0;
-static size_t pending_send_offset = 0;
-static bool send_in_progress = false;
+#ifdef USE_EXTERNAL_ADC
+void request_socket_reset(void)
+{
+    ESP_LOGI(TAG, "---------------------------------------------");
+    ESP_LOGI(TAG, "SOCKET RESET: Setting socket_reset_requested flag");
+    ESP_LOGI(TAG, "Previous flag value: %d", atomic_load(&socket_reset_requested));
+    atomic_store(&socket_reset_requested, 1);
+    ESP_LOGI(TAG, "Flag set to: %d", atomic_load(&socket_reset_requested));
+
+    // Use a longer delay to ensure the task has time to process the request
+    vTaskDelay(pdMS_TO_TICKS(350)); // Increased to 350ms
+
+    // After delay, verify if flag is still set
+    if (atomic_load(&socket_reset_requested)) {
+        ESP_LOGW(TAG, "SOCKET RESET: Flag still set after delay - forcing cleanup");
+        // Force cleanup in case socket_task is stuck
+        atomic_store(&socket_reset_requested, 0);
+    } else {
+        ESP_LOGI(TAG, "SOCKET RESET: Flag was processed successfully");
+    }
+    ESP_LOGI(TAG, "---------------------------------------------");
+}
+
+void force_socket_cleanup(void)
+{
+    ESP_LOGI(TAG, "*** FORCE SOCKET CLEANUP: Closing all connections ***");
+
+    // Close the client sockets first (from socket_task)
+    atomic_store(&socket_reset_requested, 1);
+
+    // Wait for socket_task to process the reset request
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // Force close of the listening socket to ensure clean state
+    if (new_sock != -1) {
+        ESP_LOGI(TAG, "Forcing close of listening socket %d", new_sock);
+        safe_close(new_sock);
+        new_sock = -1;
+    }
+
+    // Make sure the reset flag is cleared
+    atomic_store(&socket_reset_requested, 0);
+    ESP_LOGI(TAG, "*** Force socket cleanup completed ***");
+}
+#endif
 
 esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags)
 {
+#ifdef USE_EXTERNAL_ADC
     static int socket_at_start = -1; // To track changes in new_sock during sending
-
+#endif
     // If first send or previous send completed
     if (!send_in_progress) {
         // Store the buffer info for potential retries
@@ -192,8 +241,9 @@ esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags
         pending_send_size = len;
         pending_send_offset = 0;
         send_in_progress = true;
+#ifdef USE_EXTERNAL_ADC
         socket_at_start = new_sock; // Store the current value of new_sock
-
+#endif
         // Make socket non-blocking for this operation
         int sock_flags = fcntl(client_sock, F_GETFL, 0);
         fcntl(client_sock, F_SETFL, sock_flags | O_NONBLOCK);
@@ -219,6 +269,16 @@ esp_err_t non_blocking_send(int client_sock, void *buffer, size_t len, int flags
             fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
             send_in_progress = false;
             return ESP_FAIL; // Abort sending if the socket changed
+        }
+
+        // Also check for explicit socket reset requests
+        if (atomic_load(&socket_reset_requested)) {
+            ESP_LOGI(TAG, "Socket reset requested during send operation, aborting");
+            // Reset socket to blocking mode before returning
+            int sock_flags = fcntl(client_sock, F_GETFL, 0);
+            fcntl(client_sock, F_SETFL, sock_flags & ~O_NONBLOCK);
+            send_in_progress = false;
+            return ESP_FAIL;
         }
 #endif
 
@@ -260,6 +320,8 @@ void socket_task(void *pvParameters)
     uint32_t len;
     int current_sock = -1; // To track changes in new_sock
     int client_sock = -1; // Declare client_sock at the beginning and set it to -1
+    TickType_t last_heartbeat = 0;
+    uint32_t loop_counter = 0;
 
 #ifdef USE_EXTERNAL_ADC
     uint8_t buffer[BUF_SIZE];
@@ -275,7 +337,7 @@ void socket_task(void *pvParameters)
     uint8_t buffer[BUF_SIZE];
 #endif
 
-// Calculate actual data to send
+    // Calculate actual data to send
 #ifdef USE_EXTERNAL_ADC
     size_t sample_size = sizeof(uint8_t);
 #else
@@ -309,6 +371,36 @@ void socket_task(void *pvParameters)
         }
 #endif
 
+#ifdef USE_EXTERNAL_ADC
+        ESP_LOGD(TAG, "Socket task main loop - reset_flag:%d, new_sock:%d, current_sock:%d, client_sock:%d",
+                 atomic_load(&socket_reset_requested), new_sock, current_sock, client_sock);
+        // Check for socket reset more frequently
+        if (atomic_load(&socket_reset_requested)) {
+            ESP_LOGI(TAG, "---------------------------------------------");
+            ESP_LOGI(TAG, "SOCKET RESET: Detected in main loop");
+            ESP_LOGI(TAG, "Socket values - new:%d, current:%d, client:%d", new_sock, current_sock, client_sock);
+
+            if (client_sock >= 0) {
+                ESP_LOGI(TAG, "SOCKET RESET: Closing client socket %d due to reset request", client_sock);
+                safe_close(client_sock);
+                client_sock = -1;
+                ESP_LOGI(TAG, "SOCKET RESET: Client socket closed successfully");
+            } else {
+                ESP_LOGI(TAG, "SOCKET RESET: No client socket to close");
+            }
+
+            atomic_store(&socket_reset_requested, 0);
+            ESP_LOGI(TAG, "SOCKET RESET: Reset flag cleared");
+
+            // Add delay to ensure clean state transition
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGI(TAG, "---------------------------------------------");
+
+            // Continue to restart from the beginning of the loop
+            continue;
+        }
+#endif
+
         // Detect if the socket has changed
         if (new_sock != current_sock) {
             ESP_LOGI(TAG, "Detected socket change: previous=%d, new=%d", current_sock, new_sock);
@@ -333,12 +425,24 @@ void socket_task(void *pvParameters)
 
         ESP_LOGI(TAG, "Waiting for client connection on socket %d...", new_sock);
 
+        bool accept_completed = false;
         // Connection acceptance loop with timeouts to be able to detect changes
-        while (1) {
+        while (!accept_completed) {
+#ifdef USE_EXTERNAL_ADC
+            // Check for socket reset request
+            if (atomic_load(&socket_reset_requested)) {
+                ESP_LOGI(TAG, "SOCKET RESET: Requested while waiting for connection");
+                atomic_store(&socket_reset_requested, 0);
+                accept_completed = true; // Exit the accept loop
+                break;
+            }
+#endif
+
             // Check if the socket has changed
             if (new_sock != current_sock) {
                 ESP_LOGI(TAG, "Socket changed while waiting for connection: old=%d, new=%d", current_sock, new_sock);
-                break; // Exit the accept loop and handle the new socket
+                accept_completed = true; // Exit the accept loop
+                break;
             }
 
             client_sock = accept(new_sock, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -347,6 +451,7 @@ void socket_task(void *pvParameters)
                 // Success, we have a connection
                 inet_ntoa_r(client_addr.sin_addr, addr_str, sizeof(addr_str) - 1);
                 ESP_LOGI(TAG, "Client connected: %s, Port: %d", addr_str, ntohs(client_addr.sin_port));
+                accept_completed = true;
                 break;
             } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 // Real error in accept
@@ -354,6 +459,7 @@ void socket_task(void *pvParameters)
                 close(new_sock);
                 new_sock = -1;
                 current_sock = -1; // Reset socket tracking
+                accept_completed = true;
                 break;
             }
 
@@ -376,10 +482,24 @@ void socket_task(void *pvParameters)
         start_adc_sampling();
 #endif
 
-        while (1) {
+        bool data_transfer_complete = false;
+        loop_counter = 0;
+        last_heartbeat = xTaskGetTickCount();
+
+        while (!data_transfer_complete) {
+            // Periodic heartbeat to check if task is still running
+            if (++loop_counter % 5000 == 0) {
+                TickType_t current_time = xTaskGetTickCount();
+                if ((current_time - last_heartbeat) > pdMS_TO_TICKS(2000)) {
+                    ESP_LOGI(TAG, "Data transfer heartbeat - still active, client:%d", client_sock);
+                    last_heartbeat = current_time;
+                }
+            }
+
 #ifndef USE_EXTERNAL_ADC
             // Only for internal ADC: WiFi operations check
             if (atomic_load(&wifi_operation_requested)) {
+                data_transfer_complete = true;
                 break; // Break the inner loop to handle this at the outer loop level
             }
 
@@ -388,9 +508,19 @@ void socket_task(void *pvParameters)
                 adc_modify_freq = 0;
             }
 #else
-            // In external ADC mode, check if the socket has changed
-            if (new_sock != current_sock) {
-                ESP_LOGI(TAG, "Socket changed during data transfer, stopping current transfer");
+            // In external ADC mode, check if the socket has changed or reset is requested
+            if (new_sock != current_sock || atomic_load(&socket_reset_requested)) {
+                if (atomic_load(&socket_reset_requested)) {
+                    ESP_LOGI(TAG, "---------------------------------------------");
+                    ESP_LOGI(TAG, "SOCKET RESET: Requested during data transfer");
+                    ESP_LOGI(TAG, "Socket values - new:%d, current:%d, client:%d", new_sock, current_sock, client_sock);
+                    atomic_store(&socket_reset_requested, 0);
+                    ESP_LOGI(TAG, "SOCKET RESET: Reset flag cleared");
+                    ESP_LOGI(TAG, "---------------------------------------------");
+                } else {
+                    ESP_LOGI(TAG, "Socket changed during data transfer");
+                }
+                data_transfer_complete = true;
                 break; // Exit the inner loop and go back to accept()
             }
 #endif
@@ -419,6 +549,7 @@ void socket_task(void *pvParameters)
                     esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
                     if (send_result != ESP_OK) {
                         ESP_LOGE(TAG, "Send error");
+                        data_transfer_complete = true;
                         break;
                     }
                 } else {
@@ -452,9 +583,11 @@ void socket_task(void *pvParameters)
                     // Use non-blocking send
                     esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
                     if (send_result == ESP_ERR_TIMEOUT) {
+                        data_transfer_complete = true;
                         break; // Break the inner loop to handle WiFi operation
                     } else if (send_result != ESP_OK) {
                         ESP_LOGE(TAG, "Send error");
+                        data_transfer_complete = true;
                         break;
                     }
                 } else {
@@ -483,6 +616,7 @@ void socket_task(void *pvParameters)
                 esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
                 if (send_result != ESP_OK) {
                     ESP_LOGE(TAG, "Send error");
+                    data_transfer_complete = true;
                     break;
                 }
             } else {
@@ -501,9 +635,11 @@ void socket_task(void *pvParameters)
                 // Use non-blocking send for continuous mode
                 esp_err_t send_result = non_blocking_send(client_sock, send_buffer, send_len, flags);
                 if (send_result == ESP_ERR_TIMEOUT) {
+                    data_transfer_complete = true;
                     break; // Break the inner loop to handle WiFi operation
                 } else if (send_result != ESP_OK) {
                     ESP_LOGE(TAG, "Send error");
+                    data_transfer_complete = true;
                     break;
                 }
             } else {
@@ -521,8 +657,10 @@ void socket_task(void *pvParameters)
         stop_adc_sampling();
 #endif
 
-        safe_close(client_sock);
-        client_sock = -1;
-        ESP_LOGI(TAG, "Client disconnected");
+        if (client_sock >= 0) {
+            safe_close(client_sock);
+            client_sock = -1;
+            ESP_LOGI(TAG, "Client disconnected");
+        }
     }
 }

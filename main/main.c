@@ -46,13 +46,6 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "RSA key pair generated successfully");
 
-    // Configure watchdog with a long timeout for intensive operations
-    esp_task_wdt_config_t twdt_config = {
-        .timeout_ms = 1000000, // 1000 seconds
-        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // All cores
-        .trigger_panic = false, // Do not cause panic on timeout
-    };
-
     // Initialize signal generators for testing and calibration
     xTaskCreate(dac_sine_wave_task, "dac_sine_wave_task", 2048, NULL, 5, NULL);
     init_trigger_pwm(); // PWM for trigger level control
@@ -104,7 +97,7 @@ void app_main(void)
 #ifdef USE_EXTERNAL_ADC
     xTaskCreatePinnedToCore(socket_task, "socket_task", 72000, NULL, 5, &socket_task_handle, 1);
 #else
-    xTaskCreatePinnedToCore(socket_task, "socket_task", 55000, NULL, 5, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(socket_task, "socket_task", 53000, NULL, 5, &socket_task_handle, 1);
 #endif
 
     // Activate LED to indicate socket is ready for connections

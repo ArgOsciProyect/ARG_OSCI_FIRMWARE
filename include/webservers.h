@@ -107,7 +107,8 @@ esp_err_t freq_handler(httpd_req_t *req);
 /**
  * @brief Handler to reset data socket
  *
- * Creates a new socket for streaming data to clients.
+ * Creates a new socket for streaming data to clients. In external ADC mode,
+ * requests client disconnection via request_socket_reset() before creating a new socket.
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
@@ -128,7 +129,8 @@ esp_err_t normal_handler(httpd_req_t *req);
 /**
  * @brief Handler for connecting to external WiFi networks
  *
- * Processes credentials and connects to specified WiFi network.
+ * Processes credentials and connects to specified WiFi network. In external ADC mode,
+ * forces client disconnection using force_socket_cleanup() before changing WiFi settings.
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
@@ -149,7 +151,8 @@ esp_err_t get_public_key_handler(httpd_req_t *req);
 /**
  * @brief Handler to enable internal mode
  *
- * Sets up data streaming in access point mode.
+ * Sets up data streaming in access point mode. In external ADC mode, forces
+ * client disconnection using force_socket_cleanup() before creating a new socket.
  *
  * @param req HTTP request structure
  * @return ESP_OK on success, error code otherwise
