@@ -459,7 +459,7 @@ void configure_gpio(void)
         .intr_type = GPIO_INTR_DISABLE, // No interrupts
         .mode = GPIO_MODE_INPUT, // Configure as input
         .pin_bit_mask = (1ULL << SINGLE_INPUT_PIN), // Select the pin
-        .pull_down_en = GPIO_PULLDOWN_ENABLE, // Enable pull-down
+        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Enable pull-down
         .pull_up_en = GPIO_PULLUP_DISABLE, // Disable pull-up
     };
     gpio_config(&io_conf);
