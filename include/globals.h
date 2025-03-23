@@ -22,7 +22,7 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_continuous.h"
 
-// #define USE_EXTERNAL_ADC // Comment to use internal ADC
+#define USE_EXTERNAL_ADC // Comment to use internal ADC
 
 /* WiFi Configuration */
 #define WIFI_SSID "ESP32_AP"
@@ -59,8 +59,8 @@
 #define LED_GPIO GPIO_NUM_25
 
 /* SPI Configuration */
-#define CS_CLK_TO_PWM 10
-#define DELAY_NS 33
+#define CS_CLK_TO_PWM 11
+#define DELAY_NS 58
 #define SPI_FREQ 40000000
 #define PERIOD_TICKS 32
 #define COMPARE_VALUE 26
@@ -139,9 +139,9 @@ extern SemaphoreHandle_t spi_mutex;
     {{40000000, CS_CLK_TO_PWM, DELAY_NS, PERIOD_TICKS, COMPARE_VALUE},                    \
      {20000000, CS_CLK_TO_PWM - 2, DELAY_NS + 13, PERIOD_TICKS * 2, COMPARE_VALUE * 2},   \
      {10000000, CS_CLK_TO_PWM - 3, DELAY_NS + 38, PERIOD_TICKS * 4, COMPARE_VALUE * 4},   \
-     {5000000, CS_CLK_TO_PWM - 3, DELAY_NS + 188, PERIOD_TICKS * 8, COMPARE_VALUE * 8},   \
-     {2500000, CS_CLK_TO_PWM - 3, DELAY_NS + 88, PERIOD_TICKS * 16, COMPARE_VALUE * 16},  \
-     {1250000, CS_CLK_TO_PWM - 3, DELAY_NS + 288, PERIOD_TICKS * 32, COMPARE_VALUE * 32}, \
-     {625000, CS_CLK_TO_PWM - 3, DELAY_NS + 788, PERIOD_TICKS * 64, COMPARE_VALUE * 64}}
+     {5000000, CS_CLK_TO_PWM - 4, DELAY_NS + 188, PERIOD_TICKS * 8, COMPARE_VALUE * 8},   \
+     {2500000, CS_CLK_TO_PWM - 4, DELAY_NS + 88, PERIOD_TICKS * 16, COMPARE_VALUE * 16},  \
+     {1250000, CS_CLK_TO_PWM - 4, DELAY_NS + 288, PERIOD_TICKS * 32, COMPARE_VALUE * 32}, \
+     {625000, CS_CLK_TO_PWM - 4, DELAY_NS + 788, PERIOD_TICKS * 64, COMPARE_VALUE * 64}}
 
 #endif /* GLOBALS_H */
