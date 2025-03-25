@@ -664,7 +664,7 @@ int get_useful_bits(void)
 int get_discard_head(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 0;
+    return 6;
 #else
     return 0;
 #endif

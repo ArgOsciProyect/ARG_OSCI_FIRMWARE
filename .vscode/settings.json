@@ -27,7 +27,8 @@
     "network.h": "c",
     "errno.h": "c",
     "freertos.h": "c",
-    "atomic": "c"
+    "atomic": "c",
+    "*.inc": "c"
   },
   "idf.flashType": "UART",
   "idf.port": "/dev/ttyUSB0",
