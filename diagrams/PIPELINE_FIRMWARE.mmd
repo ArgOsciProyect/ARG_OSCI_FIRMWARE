@@ -1,0 +1,125 @@
+---
+config:
+    layout: elk
+    rankdir: LR
+---
+flowchart LR
+    %% Main components of the ESP32 Oscilloscope Firmware
+    subgraph FirmwareCore["ESP32 Oscilloscope Core"]
+        direction TB
+        AppMain[app_main] --> Initialization
+        
+        subgraph Initialization["System Initialization"]
+            NVSInit[NVS Initialize] --> NetworkInit[Network Stack Init]
+            NetworkInit --> WatchdogConfig[Watchdog Config]
+            WatchdogConfig --> CryptoInit[Crypto Initialize]
+        end
+        
+        subgraph SignalGen["Signal Generation"]
+            SineWave[DAC Sine Wave] --> TriggerPWM[Trigger PWM]
+            TriggerPWM --> SquareWave[Square Wave Generator]
+        end
+        
+        subgraph AcqSystem["Acquisition System"]
+            direction TB
+            subgraph External["External ADC"]
+                SPIMaster[SPI Master] --> MCPWMTrigger[MCPWM Trigger]
+                MCPWMTrigger --> PulseCounter[Pulse Counter]
+            end
+            subgraph Internal["Internal ADC"]
+                ADCContinuous[ADC Continuous]
+            end
+            HWTimer[Hardware Timer] --> GPIO[GPIO Configuration]
+        end
+    end
+    
+    subgraph Networking["Network Layer"]
+        direction TB
+        WiFiInit[WiFi AP+STA Init] --> LED[LED Status Indicator]
+        
+        subgraph WebInterface["Web Interface"]
+            HTTPServer[HTTP Server] --> RESTHandlers[REST API Handlers]
+            RESTHandlers --> ConfigEndpoints[Config Endpoints]
+            RESTHandlers --> TriggerEndpoints[Trigger Endpoints]
+            RESTHandlers --> ModeEndpoints[Mode Endpoints]
+            RESTHandlers --> WiFiEndpoints[WiFi Endpoints]
+        end
+    end
+    
+    subgraph Security["Security Layer"]
+        KeyGen[RSA Key Generation] --> Encryption[Encryption/Decryption]
+    end
+    
+    subgraph DataPipeline["Data Acquisition Pipeline"]
+        direction TB
+        SocketTask[Socket Task] --> TriggerMode[Trigger Mode Logic]
+        
+        TriggerMode -->|Single Mode| SingleTrigger[Single Trigger Acquisition]
+        TriggerMode -->|Continuous Mode| ContinuousAcq[Continuous Acquisition]
+        
+        SingleTrigger --> DataBuffer[Data Buffer]
+        ContinuousAcq --> DataBuffer
+        
+        DataBuffer --> SocketTransmission[Socket Transmission]
+    end
+    
+    subgraph ClientSide["Client Application"]
+        ConnectRequest[Connection Request] --> ConfigRequest[Configuration Request]
+        ConfigRequest --> TriggerConfig[Trigger Configuration]
+        TriggerConfig --> ModeSelect[Mode Selection]
+        ModeSelect --> SamplingRateConfig[Sampling Rate Config]
+        SamplingRateConfig --> DataReceive[Data Reception]
+    end
+    
+    %% Connections between major components
+    Initialization --> SignalGen
+    Initialization --> AcqSystem
+    Initialization --> Networking
+    Initialization --> Security
+    
+    Security -->|Public Key| WebInterface
+    
+    WebInterface -->|Commands| DataPipeline
+    WebInterface -->|WiFi Config| Networking
+    WebInterface -->|Trigger Settings| AcqSystem
+    WebInterface -->|Sampling Frequency| SignalGen
+    
+    AcqSystem -->|Raw Data| DataPipeline
+    
+    ClientSide -->|HTTP Requests| WebInterface
+    ClientSide -->|Socket Connection| SocketTransmission
+    
+    %% Data flow visualization
+    DataPipeline -->|Streaming Data| ClientSide
+    
+    %% Conditional flows based on ADC mode
+    External -.-> SPIMaster
+    Internal -.-> ADCContinuous
+    
+    %% Styling
+    classDef init fill:#e1f5fe,stroke:#01579b,stroke-width:1px
+    classDef signal fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px
+    classDef acq fill:#e8f5e9,stroke:#1b5e20,stroke-width:1px
+    classDef net fill:#ede7f6,stroke:#311b92,stroke-width:1px
+    classDef sec fill:#ffebee,stroke:#b71c1c,stroke-width:1px
+    classDef data fill:#fff3e0,stroke:#e65100,stroke-width:1px
+    classDef client fill:#f1f8e9,stroke:#33691e,stroke-width:1px
+    
+    class NVSInit,NetworkInit,WatchdogConfig,CryptoInit init
+    class SineWave,TriggerPWM,SquareWave signal
+    class SPIMaster,MCPWMTrigger,PulseCounter,ADCContinuous,HWTimer,GPIO acq
+    class WiFiInit,LED,HTTPServer,RESTHandlers,ConfigEndpoints,TriggerEndpoints,ModeEndpoints,WiFiEndpoints net
+    class KeyGen,Encryption sec
+    class SocketTask,TriggerMode,SingleTrigger,ContinuousAcq,DataBuffer,SocketTransmission data
+    class ConnectRequest,ConfigRequest,TriggerConfig,ModeSelect,SamplingRateConfig,DataReceive client
+    
+    %% Container styling
+    style FirmwareCore fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px
+    style Initialization fill:#e1f5fe,stroke:#01579b,stroke-width:1px
+    style SignalGen fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px
+    style AcqSystem fill:#e8f5e9,stroke:#1b5e20,stroke-width:1px
+    style Networking fill:#ede7f6,stroke:#311b92,stroke-width:2px
+    style WebInterface fill:#d1c4e9,stroke:#4527a0,stroke-width:1px
+    style Security fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    style DataPipeline fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style ClientSide fill:#f1f8e9,stroke:#33691e,stroke-width:2px
