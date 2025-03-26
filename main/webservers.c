@@ -271,7 +271,9 @@ esp_err_t single_handler(httpd_req_t *req)
 
 esp_err_t freq_handler(httpd_req_t *req)
 {
+#ifdef USE_EXTERNAL_ADC
     int final_freq;
+#endif
     char content[100];
     int received = httpd_req_recv(req, content, sizeof(content) - 1);
     if (received <= 0) {
@@ -381,6 +383,10 @@ esp_err_t reset_socket_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
         // Continue anyway, but there might be issues
     }
+#else
+    // Signal socket task to close any client connections
+    ESP_LOGI(TAG, "Requesting socket reset before resetting socket");
+    request_socket_reset();
 #endif
 
     // Get appropriate IP information based on request origin port
@@ -541,6 +547,7 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
 #ifndef USE_EXTERNAL_ADC
     // Request socket task to pause ADC operations
+    ESP_LOGI(TAG, "Pausing ADC operations for WiFi configuration");
     atomic_store(&wifi_operation_requested, 1);
 
     // Wait for acknowledgment with timeout
@@ -552,8 +559,29 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     if (timeout_count >= 500) {
         ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
-        // Continue anyway, but there might be issues
     }
+
+    // Make sure the ADC is fully stopped and reset all flags
+    if (atomic_load(&adc_is_running) || atomic_load(&adc_initializing)) {
+        ESP_LOGI(TAG, "Stopping ADC for WiFi connection");
+        stop_adc_sampling();
+
+        // Extra delay to ensure ADC resources are fully released
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Ensure flags are cleared
+        atomic_store(&adc_is_running, false);
+        atomic_store(&adc_initializing, false);
+
+        ESP_LOGI(TAG, "ADC flags reset for clean state");
+    }
+
+    // Extra safety delay before proceeding with network changes
+    vTaskDelay(pdMS_TO_TICKS(200));
+#else
+    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for connect_wifi =====");
+    force_socket_cleanup(); // Use the stronger cleanup mechanism
+    ESP_LOGI(TAG, "===== Socket reset for connect_wifi completed =====");
 #endif
 
     // Now it's safe to modify WiFi configuration
@@ -611,7 +639,6 @@ esp_err_t connect_wifi_handler(httpd_req_t *req)
 
     return ret;
 }
-
 esp_err_t internal_mode_handler(httpd_req_t *req)
 {
 #ifndef USE_EXTERNAL_ADC
@@ -625,10 +652,27 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
         timeout_count++;
     }
 
-    if (timeout_count >= 500) {
-        ESP_LOGW(TAG, "Timeout waiting for socket task to acknowledge WiFi operation");
-        // Continue anyway, but there might be issues
+    // Make sure ADC is fully stopped and its memory freed
+    if (atomic_load(&adc_is_running) || atomic_load(&adc_initializing)) {
+        ESP_LOGI(TAG, "Stopping ADC for internal mode transition");
+        stop_adc_sampling();
+
+        // Extra delay to ensure ADC resources are fully released
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Ensure flags are cleared
+        atomic_store(&adc_is_running, false);
+        atomic_store(&adc_initializing, false);
+
+        ESP_LOGI(TAG, "ADC flags reset for clean state");
     }
+
+    // Extra safety delay before proceeding with network changes
+    vTaskDelay(pdMS_TO_TICKS(200));
+#else
+    ESP_LOGI(TAG, "===== CRITICAL: Socket reset for internal_mode =====");
+    force_socket_cleanup();
+    ESP_LOGI(TAG, "===== Socket reset for internal_mode completed =====");
 #endif
 
     // Now it's safe to modify WiFi configuration
@@ -685,7 +729,7 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     }
 
 #ifndef USE_EXTERNAL_ADC
-    // Allow socket task to resume
+    // Allow socket task to resume with clean ADC state
     atomic_store(&wifi_operation_requested, 0);
 #endif
 
@@ -707,7 +751,6 @@ esp_err_t internal_mode_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Socket created for internal mode - IP: %s, Port: %d", ip_str, new_port);
     return send_internal_mode_response(req, ip_str, new_port);
 }
-
 esp_err_t get_public_key_handler(httpd_req_t *req)
 {
     // Configure CORS headers

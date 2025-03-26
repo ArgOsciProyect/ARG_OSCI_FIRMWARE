@@ -210,23 +210,24 @@ void start_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Starting ADC sampling");
 
-    // Always try to stop any potentially running ADC first
+    // Check if ADC is already running or initializing
     if (atomic_load(&adc_is_running)) {
-        ESP_LOGI(TAG, "Stopping any existing ADC before starting");
-        stop_adc_sampling();
-
-        // Wait for cleanup to complete
-        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP_LOGW(TAG, "ADC already running, not starting again");
+        return;
     }
 
-    // Set initializing flag to prevent concurrent starts
     if (atomic_exchange(&adc_initializing, true)) {
         ESP_LOGW(TAG, "ADC initialization already in progress");
         return;
     }
 
-    // Long delay to ensure system is ready
-    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "Initializing new ADC instance...");
+
+    // Make sure we're working with a clean state
+    adc_handle = NULL;
+
+    // Add memory cleanup delay
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Configure ADC pattern
     adc_digi_pattern_config_t adc_pattern = {
@@ -236,7 +237,7 @@ void start_adc_sampling(void)
     adc_continuous_handle_cfg_t adc_config = {
         .max_store_buf_size = BUF_SIZE * 2,
         .conv_frame_size = 128,
-        .flags.flush_pool = false,
+        .flags.flush_pool = false, // Important: flush the pool to clear memory
     };
 
     // Try initialization with retries
@@ -248,10 +249,13 @@ void start_adc_sampling(void)
         ret = adc_continuous_new_handle(&adc_config, &adc_handle);
 
         if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "ADC handle created successfully");
             break;
         }
 
         ESP_LOGW(TAG, "ADC initialization attempt %d failed: %s", retry_count + 1, esp_err_to_name(ret));
+
+        // After failure, add longer delay and try again
         vTaskDelay(pdMS_TO_TICKS(300));
         retry_count++;
     }
@@ -263,7 +267,7 @@ void start_adc_sampling(void)
     }
 
     // Delay after handle creation
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Configure ADC
     adc_continuous_config_t continuous_config = {.pattern_num = 1,
@@ -275,19 +279,31 @@ void start_adc_sampling(void)
     ret = adc_continuous_config(adc_handle, &continuous_config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure ADC: %s", esp_err_to_name(ret));
-        adc_continuous_deinit(adc_handle);
+
+        // Safe cleanup on failure
+        if (adc_handle) {
+            adc_continuous_deinit(adc_handle);
+            adc_handle = NULL;
+        }
+
         atomic_store(&adc_initializing, false);
         return;
     }
 
     // Delay after configuration
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Start ADC
     ret = adc_continuous_start(adc_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start ADC: %s", esp_err_to_name(ret));
-        adc_continuous_deinit(adc_handle);
+
+        // Safe cleanup on failure
+        if (adc_handle) {
+            adc_continuous_deinit(adc_handle);
+            adc_handle = NULL;
+        }
+
         atomic_store(&adc_initializing, false);
         return;
     }
@@ -303,13 +319,25 @@ void stop_adc_sampling(void)
 {
     ESP_LOGI(TAG, "Stopping ADC sampling");
 
-    // Only proceed if ADC is running
-    if (!atomic_exchange(&adc_is_running, false)) {
-        ESP_LOGW(TAG, "ADC was not running, nothing to stop");
+    if (!atomic_load(&adc_is_running)) {
+        ESP_LOGW(TAG, "ADC not running, nothing to stop");
         return;
     }
 
-    // First stop the ADC
+    // Set the running flag to false BEFORE we stop
+    atomic_store(&adc_is_running, false);
+
+    // Add safety delay
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Check if we have a valid handle before proceeding
+    if (adc_handle == NULL) {
+        ESP_LOGW(TAG, "ADC handle is NULL, nothing to stop");
+        return;
+    }
+
+    // Stop ADC
+    ESP_LOGI(TAG, "Stopping ADC operation");
     esp_err_t ret = adc_continuous_stop(adc_handle);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to stop ADC: %s", esp_err_to_name(ret));
@@ -318,14 +346,20 @@ void stop_adc_sampling(void)
     // Add significant delay before deinitializing
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    // Then deinitialize
+    // Deinitialize ADC
+    ESP_LOGI(TAG, "Deinitializing ADC");
     ret = adc_continuous_deinit(adc_handle);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to deinitialize ADC: %s", esp_err_to_name(ret));
     }
 
+    // Clear handle to ensure it's not reused
+    adc_handle = NULL;
+
     // Add extra delay after deinitialization
     vTaskDelay(pdMS_TO_TICKS(300));
+
+    ESP_LOGI(TAG, "ADC stopped and deinitialized");
 }
 void config_adc_sampling(void)
 {
@@ -425,7 +459,7 @@ void configure_gpio(void)
         .intr_type = GPIO_INTR_DISABLE, // No interrupts
         .mode = GPIO_MODE_INPUT, // Configure as input
         .pin_bit_mask = (1ULL << SINGLE_INPUT_PIN), // Select the pin
-        .pull_down_en = GPIO_PULLDOWN_ENABLE, // Enable pull-down
+        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down
         .pull_up_en = GPIO_PULLUP_DISABLE, // Disable pull-up
     };
     gpio_config(&io_conf);
@@ -630,7 +664,7 @@ int get_useful_bits(void)
 int get_discard_head(void)
 {
 #ifdef USE_EXTERNAL_ADC
-    return 0;
+    return 6;
 #else
     return 0;
 #endif
@@ -649,10 +683,11 @@ int get_samples_per_packet(void)
 
 int get_max_bits(void)
 {
+    // get_max_bits must always be lower than 1024
 #ifdef USE_EXTERNAL_ADC
     return 1023;
 #else
-    return 1023;
+    return 945;
 #endif
 }
 
@@ -660,8 +695,8 @@ int get_mid_bits(void)
 {
     // get_mid_bits must always be greater than half of get_max_bits
 #ifdef USE_EXTERNAL_ADC
-    return 512;
+    return 551;
 #else
-    return 512;
+    return 473;
 #endif
 }
