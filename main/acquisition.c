@@ -683,8 +683,9 @@ int get_samples_per_packet(void)
 
 int get_max_bits(void)
 {
+    // get_max_bits must always be lower than 1024
 #ifdef USE_EXTERNAL_ADC
-    return 1101;
+    return 1023;
 #else
     return 945;
 #endif
