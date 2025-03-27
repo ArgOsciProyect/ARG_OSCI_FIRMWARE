@@ -31,7 +31,7 @@ atomic_bool adc_is_running = ATOMIC_VAR_INIT(false);
 #endif
 
 static const voltage_scale_t voltage_scales[] = {
-    {400.0, "200V, -200V"}, {120.0, "60V, -60V"}, {24.0, "12V, -12V"}, {6.0, "3V, -3V"}, {1.0, "500mV, -500mV"}};
+    {1.143, "570mV, -570mV"}, {2.906, "1.45V, -1.45V"}, {7.644, "3.82V, -3.82V"}, {19.264, "9.63, -9.63V"}, {46.408, "23.2V, -23.2V"}, {117.985, "58.9V, -58.9V"}, {310.351, "155V, -155V"}, {782.137, "391V, -391V"}};
 
 int get_voltage_scales_count(void)
 {
