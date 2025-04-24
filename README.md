@@ -739,7 +739,6 @@ void app_main(void) {
 
 ## Pending Tasks and Recommendations
 
-- Expand documentation on ADC configuration, nonlinearity, and SPI/MCPWM rationale.
 - Review and improve error handling and memory management.
 - Add more detailed diagrams and code examples where useful.
 - Document known issues and troubleshooting steps.
